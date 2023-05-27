@@ -7,13 +7,14 @@ using Microsoft.PowerFx.Core.Localization;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Utils;
 
+#pragma warning disable SA1402 // File may only contain a single type
+#pragma warning disable SA1649 // File name should match first type name
+
 namespace Microsoft.PowerFx.Core.Texl.Builtins
 {
     internal class ClockFunction : BuiltinFunction
     {
         public override bool IsSelfContained => true;
-
-        public override bool SupportsParamCoercion => true;
 
         public ClockFunction(string functionInvariantName, TexlStrings.StringGetter functionDescription)
             : base(new DPath().Append(new DName(LanguageConstants.InvariantClockNamespace)), functionInvariantName, functionDescription, FunctionCategories.DateTime, DType.CreateTable(new TypedName(DType.String, new DName("Value"))), 0, 0, 0)
@@ -49,8 +50,6 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
     {
         public override bool IsSelfContained => true;
 
-        public override bool SupportsParamCoercion => true;
-
         public IsClock24Function()
             : base(new DPath().Append(new DName(LanguageConstants.InvariantClockNamespace)), "IsClock24", TexlStrings.AboutClock__IsClock24, FunctionCategories.DateTime, DType.Boolean, 0, 0, 0)
         {
@@ -62,3 +61,6 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
         }
     }
 }
+
+#pragma warning restore SA1402 // File may only contain a single type
+#pragma warning restore SA1649 // File name should match first type name

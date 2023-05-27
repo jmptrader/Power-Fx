@@ -3,14 +3,12 @@
 
 using Microsoft.PowerFx.Core.Binding;
 using Microsoft.PowerFx.Core.Binding.BindInfo;
-using Microsoft.PowerFx.Core.Lexer;
 using Microsoft.PowerFx.Core.Localization;
 using Microsoft.PowerFx.Core.Logging;
 using Microsoft.PowerFx.Core.Logging.Trackers;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
 namespace Microsoft.PowerFx.Core.Functions.Delegation.DelegationStrategies
 {
@@ -40,6 +38,10 @@ namespace Microsoft.PowerFx.Core.Functions.Delegation.DelegationStrategies
             }
 
             var isRHSDelegableTable = IsRHSDelegableTable(binding, binaryOpNode, metadata);
+            if (isRHSDelegableTable && binaryOpNode.Left is DottedNameNode dottedField && binding.GetType(dottedField.Left).HasExpandInfo)
+            {
+                return base.IsSupportedOpNode(node, metadata, binding);
+            }
 
             DName columnName = default;
             FirstNameInfo info = null;
@@ -53,6 +55,16 @@ namespace Microsoft.PowerFx.Core.Functions.Delegation.DelegationStrategies
             var isRowScopedOrLambda = IsRowScopedOrLambda(binding, node, info, columnName, metadata);
             if (!isRowScopedOrLambda)
             {
+                return false;
+            }
+
+            var leftType = binding.GetType(binaryOpNode.Left);
+            var rightType = binding.GetType(binaryOpNode.Right);
+            var isLeftNodeAsync = binding.IsAsync(binaryOpNode.Left);
+            var isRightNodeAsync = binding.IsAsync(binaryOpNode.Right);
+            if ((leftType.IsMultiSelectOptionSet() && isRightNodeAsync) || (rightType.IsMultiSelectOptionSet() && isLeftNodeAsync))
+            {
+                SuggestDelegationHint(node, binding);
                 return false;
             }
 
@@ -70,9 +82,9 @@ namespace Microsoft.PowerFx.Core.Functions.Delegation.DelegationStrategies
             var hasEnhancedDelegation = binding.Document.Properties.EnabledFeatures.IsEnhancedDelegationEnabled;
             var isColumn = rightNodeType?.IsColumn == true;
             var isDelegationSupportedByTable = metadata.IsDelegationSupportedByTable(DelegationCapability.CdsIn);
-            var hasLeftFirstNameNodeOrIsFullRecordRowScopeAccess = binaryOpNode.Left?.AsFirstName() != null || binding.IsFullRecordRowScopeAccess(binaryOpNode.Left);
+            var hasLeftFirstNameNodeOrIsFullRecordRowScopeAccessOrLookup = binaryOpNode.Left?.AsFirstName() != null || binding.IsFullRecordRowScopeAccess(binaryOpNode.Left) || (binaryOpNode.Left is DottedNameNode dottedField && binding.GetType(dottedField.Left).HasExpandInfo);
 
-            return hasEnhancedDelegation && isColumn && isDelegationSupportedByTable && hasLeftFirstNameNodeOrIsFullRecordRowScopeAccess;
+            return hasEnhancedDelegation && isColumn && isDelegationSupportedByTable && hasLeftFirstNameNodeOrIsFullRecordRowScopeAccessOrLookup;
         }
 
         public bool CheckForFullyQualifiedFieldAccess(bool isRHSDelegableTable, BinaryOpNode binaryOpNode, TexlBinding binding, TexlNode node, ref DName columnName, ref FirstNameInfo info)
@@ -129,7 +141,7 @@ namespace Microsoft.PowerFx.Core.Functions.Delegation.DelegationStrategies
                 return false;
             }
 
-            IDelegationMetadata columnMetadata = info.Data as DelegationMetadata.DelegationMetadata;
+            IDelegationMetadata columnMetadata = info.Data as DelegationMetadata.DelegationMetadataBase;
 
             // For this to be delegable, rhs needs to be a column that belongs to innermost scoped delegable datasource.
             if (columnMetadata == null || info.UpCount != 0)
@@ -164,7 +176,11 @@ namespace Microsoft.PowerFx.Core.Functions.Delegation.DelegationStrategies
             }
 
             var nodeType = binding.GetType(column);
-            return DType.String.Accepts(nodeType) || nodeType.CoercesTo(DType.String);
+            var hasEnhancedDelegation = binding.Document.Properties.EnabledFeatures.IsEnhancedDelegationEnabled;
+            var usePowerFxV1CompatibilityRules = binding.Features.PowerFxV1CompatibilityRules;
+            return DType.String.Accepts(nodeType, exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: usePowerFxV1CompatibilityRules) ||
+                nodeType.CoercesTo(DType.String, aggregateCoercion: true, isTopLevelCoercion: false, usePowerFxV1CompatibilityRules: usePowerFxV1CompatibilityRules) ||
+                (hasEnhancedDelegation && nodeType.IsMultiSelectOptionSet() && nodeType.IsTable);
         }
 
         public override bool IsOpSupportedByTable(OperationCapabilityMetadata metadata, TexlNode node, TexlBinding binding)
@@ -180,11 +196,17 @@ namespace Microsoft.PowerFx.Core.Functions.Delegation.DelegationStrategies
             }
 
             // RHS always needs to be firstname node or dottedname lambda access to support delegation.
-            if (!(_binaryOpNode.Right.Kind == NodeKind.FirstName ||
-                binding.IsFullRecordRowScopeAccess(_binaryOpNode.Right) ||
-                (metadata.IsDelegationSupportedByTable(DelegationCapability.CdsIn) &&
-                (_binaryOpNode.Left.Kind == NodeKind.FirstName || binding.IsFullRecordRowScopeAccess(_binaryOpNode.Left)) &&
-                (_binaryOpNode.Right.Kind == NodeKind.Table || binding.GetType(_binaryOpNode.Right)?.IsColumn == true))))
+            var isRHSFirstName = _binaryOpNode.Right.Kind == NodeKind.FirstName;
+            var isRHSRecordScope = binding.IsFullRecordRowScopeAccess(_binaryOpNode.Right);
+
+            // Check if this is a table delegation for CDS in operator
+            var isCdsInTableDelegation = binding.Document.Properties.EnabledFeatures.IsEnhancedDelegationEnabled && metadata.IsDelegationSupportedByTable(DelegationCapability.CdsIn) &&
+                /* Left node can be first name, row scope lambda or a lookup column */
+                (_binaryOpNode.Left.Kind == NodeKind.FirstName || binding.IsFullRecordRowScopeAccess(_binaryOpNode.Left) || (_binaryOpNode.Left.Kind == NodeKind.DottedName && binding.GetType((_binaryOpNode.Left as DottedNameNode).Left).HasExpandInfo)) &&
+                /* Right has to be a single column table */
+                ((_binaryOpNode.Right.Kind == NodeKind.Table || binding.GetType(_binaryOpNode.Right)?.IsColumn == true) && (binding.Features.AllowAsyncDelegation || !binding.IsAsync(_binaryOpNode.Right)));
+
+            if (!(isRHSFirstName || isRHSRecordScope || isCdsInTableDelegation))
             {
                 return false;
             }

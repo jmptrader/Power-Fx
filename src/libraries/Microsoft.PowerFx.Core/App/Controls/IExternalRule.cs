@@ -6,7 +6,7 @@ using Microsoft.PowerFx.Core.Binding;
 using Microsoft.PowerFx.Core.Entities.QueryOptions;
 using Microsoft.PowerFx.Core.Functions;
 using Microsoft.PowerFx.Core.Logging.Trackers;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
+using Microsoft.PowerFx.Syntax;
 
 namespace Microsoft.PowerFx.Core.App.Controls
 {
@@ -18,10 +18,6 @@ namespace Microsoft.PowerFx.Core.App.Controls
 
         TexlBinding Binding { get; }
 
-        bool HasErrors { get; }
-
-        bool HasControlPropertyDependency(string referencedControlUniqueId);
-
-        void SetDelegationTrackerStatus(TexlNode node, DelegationStatus status, DelegationTelemetryInfo logInfo, TexlFunction func);
+        bool HasErrorsOrWarnings { get; }
     }
 }

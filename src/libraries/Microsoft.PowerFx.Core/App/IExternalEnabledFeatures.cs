@@ -9,7 +9,7 @@ namespace Microsoft.PowerFx.Core.App
     /// DO NOT add flags to this clas without very strong justification. We do not want to allow PowerFx
     /// behavior to be different between target platforms. 
     /// </summary>
-    public interface IExternalEnabledFeatures
+    internal interface IExternalEnabledFeatures
     {
         bool IsEnhancedDelegationEnabled { get; }
 
@@ -20,9 +20,11 @@ namespace Microsoft.PowerFx.Core.App
         bool IsUseDisplayNameMetadataEnabled { get; }
 
         bool IsDynamicSchemaEnabled { get; }
+
+        bool IsEnhancedComponentFunctionPropertyEnabled { get; }
     }
 
-    public class DefaultEnabledFeatures : IExternalEnabledFeatures
+    internal sealed class DefaultEnabledFeatures : IExternalEnabledFeatures
     {
         public bool IsEnhancedDelegationEnabled => true;
 
@@ -33,5 +35,7 @@ namespace Microsoft.PowerFx.Core.App
         public bool IsUseDisplayNameMetadataEnabled => true;
 
         public bool IsDynamicSchemaEnabled => true;
+
+        public bool IsEnhancedComponentFunctionPropertyEnabled => true;
     }
 }

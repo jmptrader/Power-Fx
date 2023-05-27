@@ -2,17 +2,21 @@
 // Licensed under the MIT license.
 
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.PowerFx.Core.App.ErrorContainers;
 using Microsoft.PowerFx.Core.Binding;
-using Microsoft.PowerFx.Core.Binding.BindInfo;
 using Microsoft.PowerFx.Core.Entities;
 using Microsoft.PowerFx.Core.Errors;
 using Microsoft.PowerFx.Core.Functions;
 using Microsoft.PowerFx.Core.Functions.Delegation;
+using Microsoft.PowerFx.Core.Functions.Delegation.DelegationStrategies;
 using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
+
+#pragma warning disable SA1402 // File may only contain a single type
+#pragma warning disable SA1649 // File name should match first type name
 
 namespace Microsoft.PowerFx.Core.Texl.Builtins
 {
@@ -20,8 +24,6 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
     internal sealed class AsTypeFunction : BuiltinFunction
     {
         public const string AsTypeInvariantFunctionName = "AsType";
-
-        public override bool RequiresErrorContext => true;
 
         public override bool IsAsync => true;
 
@@ -41,7 +43,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             yield return new[] { TexlStrings.AsTypeArg1, TexlStrings.AsTypeArg2 };
         }
 
-        public override bool CheckInvocation(TexlBinding binding, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
+        public override bool CheckTypes(CheckTypesContext context, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
         {
             Contracts.AssertValue(args);
             Contracts.AssertAllValues(args);
@@ -50,40 +52,56 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             Contracts.Assert(argTypes.Length == 2);
             Contracts.AssertValue(errors);
 
-            if (!base.CheckInvocation(binding, args, argTypes, errors, out returnType, out nodeToCoercedTypeMap))
+            if (!base.CheckTypes(context, args, argTypes, errors, out returnType, out nodeToCoercedTypeMap))
             {
                 return false;
             }
 
-            // Check if first argument is poly type or an activity pointer
-            if (!argTypes[0].IsPolymorphic && !argTypes[0].IsActivityPointer)
-            {
-                errors.EnsureError(DocumentErrorSeverity.Severe, args[0], TexlStrings.ErrBadType_ExpectedType_ProvidedType, DKind.Polymorphic.ToString(), argTypes[0].GetKindString());
-                return false;
-            }
+            var tableArgType = argTypes[1];
 
-            // Check if table arg referrs to a connected data source.
-            var tableArg = args[1];
-            if (!binding.TryGetFirstNameInfo(tableArg.Id, out var tableInfo) ||
-                tableInfo.Data is not IExternalDataSource tableDsInfo ||
-                !(tableDsInfo is IExternalTabularDataSource))
+            if (tableArgType.AssociatedDataSources.Any())
             {
-                errors.EnsureError(tableArg, TexlStrings.ErrAsTypeAndIsTypeExpectConnectedDataSource);
-                return false;
-            }
+                var tableDsInfo = tableArgType.AssociatedDataSources.Single();
 
-            if (binding.Document.Properties.EnabledFeatures.IsEnhancedDelegationEnabled && (tableDsInfo is IExternalCdsDataSource) && argTypes[0].HasPolymorphicInfo)
-            {
-                var expandInfo = argTypes[0].PolymorphicInfo.TryGetExpandInfo(tableDsInfo.TableMetadata.Name);
-                if (expandInfo != null)
+                if (context.IsEnhancedDelegationEnabled && (tableDsInfo is IExternalCdsDataSource) && argTypes[0].HasPolymorphicInfo)
                 {
-                    returnType = argTypes[0].ExpandPolymorphic(argTypes[1], expandInfo);
-                    return true;
+                    var expandInfo = argTypes[0].PolymorphicInfo.TryGetExpandInfo(tableDsInfo.TableMetadata.Name);
+                    if (expandInfo != null)
+                    {
+                        returnType = argTypes[0].ExpandPolymorphic(argTypes[1], expandInfo);
+                        return true;
+                    }
                 }
             }
 
             returnType = argTypes[1].ToRecord();
             return true;
+        }
+
+        public override void CheckSemantics(TexlBinding binding, TexlNode[] args, DType[] argTypes, IErrorContainer errors)
+        {
+            // Check if first argument is poly type or an activity pointer
+            if (!argTypes[0].IsPolymorphic && !argTypes[0].IsActivityPointer)
+            {
+                errors.EnsureError(DocumentErrorSeverity.Severe, args[0], TexlStrings.ErrBadType_ExpectedType_ProvidedType, DKind.Polymorphic.ToString(), argTypes[0].GetKindString());
+            }
+
+            // Check if table arg referrs to a connected data source.
+            var tableArg = args[1];
+            var ads = argTypes[1].AssociatedDataSources?.FirstOrDefault();
+
+            if (!binding.TryGetFirstNameInfo(tableArg.Id, out var tableInfo) ||
+                !(IsExternalSource(ads) ||
+                IsExternalSource(tableInfo.Data)))
+            {
+                errors.EnsureError(tableArg, TexlStrings.ErrAsTypeAndIsTypeExpectConnectedDataSource);
+            }
+        }
+
+        private static bool IsExternalSource(object externalDataSource)
+        {
+            return externalDataSource is IExternalDataSource tDsInfo &&
+                tDsInfo is IExternalTabularDataSource; 
         }
 
         public override bool IsRowScopedServerDelegatable(CallNode callNode, TexlBinding binding, OperationCapabilityMetadata metadata)
@@ -102,5 +120,27 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             // For the second argument, we need only metadata. No actual data from datasource is required.
             return paramIndex != 1;
         }
+
+        public override ICallNodeDelegatableNodeValidationStrategy GetCallNodeDelegationStrategy()
+        {
+            return new AsTypeCallNodeDelegationStrategy(this);
+        }
+    }
+
+    internal sealed class AsTypeCallNodeDelegationStrategy : DelegationValidationStrategy
+    {
+        public AsTypeCallNodeDelegationStrategy(TexlFunction function)
+            : base(function)
+        {
+        }
+
+        protected override bool IsValidAsyncOrImpureNode(TexlNode node, TexlBinding binding, TexlFunction trackingFunction = null)
+        {
+            // AsType should always be marked as valid regardless of it being async and impure.
+            return true;
+        }
     }
 }
+
+#pragma warning restore SA1402 // File may only contain a single type
+#pragma warning restore SA1649 // File name should match first type name

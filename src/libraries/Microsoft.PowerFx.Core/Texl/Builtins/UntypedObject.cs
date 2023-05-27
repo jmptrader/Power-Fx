@@ -10,26 +10,22 @@ using Microsoft.PowerFx.Core.Types;
 
 namespace Microsoft.PowerFx.Core.Texl.Builtins
 {
-    internal sealed class ParseJsonFunction : BuiltinFunction
+    internal class ParseJSONFunction : BuiltinFunction
     {
-        public const string ParseJsonInvariantFunctionName = "ParseJson";
-
-        public override bool RequiresErrorContext => true;
+        public const string ParseJSONInvariantFunctionName = "ParseJSON";
 
         public override bool IsSelfContained => true;
 
         public override bool SupportsParamCoercion => false;
 
-        public override bool IsHidden => true;
-
-        public ParseJsonFunction()
-            : base(ParseJsonInvariantFunctionName, TexlStrings.AboutParseJson, FunctionCategories.Text, DType.UntypedObject, 0, 1, 1, DType.String)
+        public ParseJSONFunction()
+            : base(ParseJSONInvariantFunctionName, TexlStrings.AboutParseJSON, FunctionCategories.Text, DType.UntypedObject, 0, 1, 1, DType.String)
         {
         }
 
         public override IEnumerable<TexlStrings.StringGetter[]> GetSignatures()
         {
-            yield return new[] { TexlStrings.ParseJsonArg1 };
+            yield return new[] { TexlStrings.ParseJSONArg1 };
         }
     }
 
@@ -37,17 +33,16 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
     {
         public const string IndexInvariantFunctionName = "Index";
 
-        public override bool RequiresErrorContext => true;
-
         public override bool IsSelfContained => true;
-
-        public override bool SupportsParamCoercion => false;
-
-        public override bool IsHidden => true;
 
         public IndexFunction_UO()
             : base(IndexInvariantFunctionName, TexlStrings.AboutIndex, FunctionCategories.Table, DType.UntypedObject, 0, 2, 2, DType.UntypedObject, DType.Number)
         {
+        }
+
+        public override string GetUniqueTexlRuntimeName(bool isPrefetching = false)
+        {
+            return GetUniqueTexlRuntimeName(suffix: "_UO");
         }
 
         public override IEnumerable<TexlStrings.StringGetter[]> GetSignatures()

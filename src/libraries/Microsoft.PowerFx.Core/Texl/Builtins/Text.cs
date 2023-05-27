@@ -1,14 +1,19 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using Microsoft.PowerFx.Core.App.ErrorContainers;
+using Microsoft.PowerFx.Core.Binding;
 using Microsoft.PowerFx.Core.Errors;
 using Microsoft.PowerFx.Core.Functions;
 using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
+using Microsoft.PowerFx.Core.Types.Enums;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
+using static Microsoft.PowerFx.Syntax.PrettyPrintVisitor;
 
 namespace Microsoft.PowerFx.Core.Texl.Builtins
 {
@@ -18,14 +23,12 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
     // Corresponding DAX functions: Format, Fixed
     internal sealed class TextFunction : BuiltinFunction
     {
-        public override bool SupportsParamCoercion => true;
-
-        public override bool RequiresErrorContext => true;
-
         public override bool IsSelfContained => true;
 
+        public const string TextInvariantFunctionName = "Text";
+
         public TextFunction()
-            : base("Text", TexlStrings.AboutText, FunctionCategories.Table | FunctionCategories.Text | FunctionCategories.DateTime, DType.String, 0, 1, 3, DType.Number, DType.String, DType.String)
+            : base(TextInvariantFunctionName, TexlStrings.AboutText, FunctionCategories.Table | FunctionCategories.Text | FunctionCategories.DateTime, DType.String, 0, 1, 3, DType.Number, DType.String, DType.String)
         {
         }
 
@@ -35,7 +38,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             yield return new[] { TexlStrings.TextArg1, TexlStrings.TextArg2, TexlStrings.TextArg3 };
         }
 
-        public override bool CheckInvocation(TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
+        public override bool CheckTypes(CheckTypesContext checkTypesContext, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
         {
             Contracts.AssertValue(args);
             Contracts.AssertAllValues(args);
@@ -52,19 +55,39 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             var arg0Type = argTypes[0];
 
             var isValidString = true;
-            var isValidNumber = CheckType(arg0, arg0Type, DType.Number, DefaultErrorContainer, out var matchedWithCoercion);
-            var arg0CoercedType = matchedWithCoercion ? DType.Number : DType.Invalid;
+            var isValidNumber = false;
+            var matchedWithCoercion = false;
+            DType arg0CoercedType = null;
+
+            if (
+                !DType.Decimal.Accepts(
+                    arg0Type,
+                    exact: true,
+                    useLegacyDateTimeAccepts: false,
+                    usePowerFxV1CompatibilityRules: checkTypesContext.Features.PowerFxV1CompatibilityRules) &&
+                (checkTypesContext.NumberIsFloat || DType.Number.Accepts(arg0Type, exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: checkTypesContext.Features.PowerFxV1CompatibilityRules)))
+            {
+                isValidNumber = CheckType(checkTypesContext, arg0, arg0Type, DType.Number, DefaultErrorContainer, out matchedWithCoercion);
+                arg0CoercedType = matchedWithCoercion ? DType.Number : DType.Invalid;
+            }
+            else
+            {
+                isValidNumber = CheckType(checkTypesContext, arg0, arg0Type, DType.Decimal, DefaultErrorContainer, out matchedWithCoercion);
+                arg0CoercedType = matchedWithCoercion ? DType.Decimal : DType.Invalid;
+            }
 
             if (!isValidNumber || matchedWithCoercion)
             {
-                if (DType.DateTime.Accepts(arg0Type))
+                if (DType.DateTime.Accepts(arg0Type, exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: checkTypesContext.Features.PowerFxV1CompatibilityRules) ||
+                    DType.Time.Accepts(arg0Type, exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: checkTypesContext.Features.PowerFxV1CompatibilityRules) ||
+                    DType.Date.Accepts(arg0Type, exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: checkTypesContext.Features.PowerFxV1CompatibilityRules))
                 {
                     // No coercion needed for datetimes here.
                     arg0CoercedType = DType.Invalid;
                 }
                 else
                 {
-                    isValidString = CheckType(arg0, arg0Type, DType.String, DefaultErrorContainer, out matchedWithCoercion);
+                    isValidString = CheckType(checkTypesContext, arg0, arg0Type, DType.String, DefaultErrorContainer, out matchedWithCoercion);
 
                     if (isValidString)
                     {
@@ -100,46 +123,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
                 return isValid;
             }
 
-            StrLitNode formatNode;
-            if (!DType.String.Accepts(argTypes[1]))
-            {
-                errors.EnsureError(DocumentErrorSeverity.Severe, args[1], TexlStrings.ErrStringExpected);
-                isValid = false;
-            }
-            else if ((formatNode = args[1].AsStrLit()) != null)
-            {
-                // Verify statically that the format string doesn't contain BOTH numeric and date/time
-                // format specifiers. If it does, that's an error accd to Excel and our spec.
-                var fmt = formatNode.Value;
-
-                // But firstly skip any locale-prefix
-                if (fmt.StartsWith("[$-"))
-                {
-                    var end = fmt.IndexOf(']', 3);
-                    if (end > 0)
-                    {
-                        fmt = fmt.Substring(end + 1);
-                    }
-                }
-
-                var hasDateTimeFmt = fmt.IndexOfAny(new char[] { 'm', 'd', 'y', 'h', 'H', 's', 'a', 'A', 'p', 'P' }) >= 0;
-                var hasNumericFmt = fmt.IndexOfAny(new char[] { '0', '#' }) >= 0;
-                if (hasDateTimeFmt && hasNumericFmt)
-                {
-                    errors.EnsureError(DocumentErrorSeverity.Moderate, formatNode, TexlStrings.ErrIncorrectFormat_Func, Name);
-                    isValid = false;
-                }
-            }
-
-            if (args.Length > 2)
-            {
-                var argType = argTypes[2];
-                if (!DType.String.Accepts(argType))
-                {
-                    errors.EnsureError(DocumentErrorSeverity.Severe, args[2], TexlStrings.ErrStringExpected);
-                    isValid = false;
-                }
-            }
+            ValidateFormatArgs(Name, checkTypesContext, args, argTypes, errors, ref nodeToCoercedTypeMap, ref isValid);
 
             if (isValid)
             {
@@ -157,6 +141,61 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             return isValid;
         }
 
+        internal static void ValidateFormatArgs(string name, CheckTypesContext checkTypesContext, TexlNode[] args, DType[] argTypes, IErrorContainer errors, ref Dictionary<TexlNode, DType> nodeToCoercedTypeMap, ref bool isValid)
+        {
+            if (BuiltInEnums.DateTimeFormatEnum.FormulaType._type.Accepts(argTypes[1], exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: checkTypesContext.Features.PowerFxV1CompatibilityRules))
+            {
+                // Coerce enum values to string
+                CollectionUtils.Add(ref nodeToCoercedTypeMap, args[1], DType.String);
+            }
+            else if (!DType.String.Accepts(argTypes[1], exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: checkTypesContext.Features.PowerFxV1CompatibilityRules))
+            {
+                errors.EnsureError(DocumentErrorSeverity.Severe, args[1], TexlStrings.ErrStringExpected);
+                isValid = false;
+            }
+            else if (BinderUtils.TryGetConstantValue(checkTypesContext, args[1], out var formatArg))
+            {
+                // Verify statically that the format string doesn't contain BOTH numeric and date/time
+                // format specifiers. If it does, that's an error according to Excel and our spec.
+
+                // But firstly skip any locale-prefix
+                if (formatArg.StartsWith("[$-", StringComparison.Ordinal))
+                {
+                    var end = formatArg.IndexOf(']', 3);
+                    if (end > 0)
+                    {
+                        formatArg = formatArg.Substring(end + 1);
+                    }
+                }
+
+                var hasDateTimeFmt = formatArg.IndexOfAny(new char[] { 'm', 'd', 'y', 'h', 'H', 's', 'a', 'A', 'p', 'P' }) >= 0;
+                var hasNumericFmt = formatArg.IndexOfAny(new char[] { '0', '#' }) >= 0;
+                if (hasDateTimeFmt && hasNumericFmt)
+                {
+                    // Check if the date time format contains '0's after the seconds specifier, which
+                    // is used for fractional seconds - in which case it is valid
+                    var formatWithoutZeroSubseconds = Regex.Replace(formatArg, @"[sS]\.?(0+)", m => m.Groups[1].Success ? string.Empty : m.Groups[1].Value);
+                    hasNumericFmt = formatWithoutZeroSubseconds.IndexOfAny(new char[] { '0', '#' }) >= 0;
+                }
+
+                if (hasDateTimeFmt && hasNumericFmt)
+                {
+                    errors.EnsureError(DocumentErrorSeverity.Moderate, args[1], TexlStrings.ErrIncorrectFormat_Func, name);
+                    isValid = false;
+                }
+            }
+
+            if (args.Length > 2)
+            {
+                var argType = argTypes[2];
+                if (!DType.String.Accepts(argType, exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: checkTypesContext.Features.PowerFxV1CompatibilityRules))
+                {
+                    errors.EnsureError(DocumentErrorSeverity.Severe, args[2], TexlStrings.ErrStringExpected);
+                    isValid = false;
+                }
+            }
+        }
+
         // This method returns true if there are special suggestions for a particular parameter of the function.
         public override bool HasSuggestionsForParam(int argumentIndex)
         {
@@ -164,19 +203,20 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
 
             return argumentIndex == 1 || argumentIndex == 2;
         }
+
+        public override IEnumerable<string> GetRequiredEnumNames()
+        {
+            return new List<string>() { LanguageConstants.DateTimeFormatEnumString };
+        }
     }
 
     // Text(arg:O)
     internal sealed class TextFunction_UO : BuiltinFunction
     {
-        public override bool SupportsParamCoercion => false;
-
-        public override bool RequiresErrorContext => true;
-
         public override bool IsSelfContained => true;
 
         public TextFunction_UO()
-            : base("Text", TexlStrings.AboutText, FunctionCategories.Text, DType.String, 0, 1, 1, DType.UntypedObject)
+            : base(TextFunction.TextInvariantFunctionName, TexlStrings.AboutText, FunctionCategories.Text, DType.String, 0, 1, 3, DType.UntypedObject, DType.String, DType.String)
         {
         }
 
@@ -188,6 +228,29 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
         public override string GetUniqueTexlRuntimeName(bool isPrefetching = false)
         {
             return GetUniqueTexlRuntimeName(suffix: "_UO");
+        }
+
+        public override bool CheckTypes(CheckTypesContext context, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
+        {
+            var isValid = base.CheckTypes(context, args, argTypes, errors, out returnType, out nodeToCoercedTypeMap);
+
+            if (args.Length > 1)
+            {
+                // The 2nd and 3rd arguments can be validated using the same logic as the normal Text function
+                TextFunction.ValidateFormatArgs(Name, context, args, argTypes, errors, ref nodeToCoercedTypeMap, ref isValid);
+            }
+
+            return isValid;
+        }
+
+        public override ArgPreprocessor GetArgPreprocessor(int index, int argCount)
+        {
+            if (index == 0 && argCount > 1)
+            {
+                return ArgPreprocessor.UntypedStringToUntypedNumber;
+            }
+
+            return base.GetArgPreprocessor(index, argCount);
         }
     }
 }

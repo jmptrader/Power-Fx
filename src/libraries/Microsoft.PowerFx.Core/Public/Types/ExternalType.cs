@@ -4,7 +4,7 @@
 using System;
 using Microsoft.PowerFx.Core.Types;
 
-namespace Microsoft.PowerFx.Core.Public.Types
+namespace Microsoft.PowerFx.Types
 {
     /// <summary>
     /// This enum represents types which are not supported by PowerFx
@@ -12,8 +12,10 @@ namespace Microsoft.PowerFx.Core.Public.Types
     /// </summary>
     public enum ExternalTypeKind
     {
-        Array, // PowerFx only supports single-column tables
-        Object // PowerFx does not support schema-less objects
+        Array,  // Power Fx only supports single-column tables
+        Object, // Power Fx does not support schema-less objects
+        ArrayAndObject, // Supports Array indexing and Property access
+        UntypedNumber, // Could be mapped to either a Power Fx Float or a Decimal, it is open to interpretation
     }
 
     /// <summary>
@@ -24,6 +26,8 @@ namespace Microsoft.PowerFx.Core.Public.Types
     {
         public static readonly FormulaType ObjectType = new ExternalType(ExternalTypeKind.Object);
         public static readonly FormulaType ArrayType = new ExternalType(ExternalTypeKind.Array);
+        public static readonly FormulaType ArrayAndObject = new ExternalType(ExternalTypeKind.ArrayAndObject);
+        public static readonly FormulaType UntypedNumber = new ExternalType(ExternalTypeKind.UntypedNumber);
 
         public ExternalTypeKind Kind { get; }
 
@@ -33,7 +37,7 @@ namespace Microsoft.PowerFx.Core.Public.Types
             Kind = kind;
         }
 
-        public override void Visit(ITypeVistor vistor)
+        public override void Visit(ITypeVisitor vistor)
         {
             throw new NotImplementedException();
         }

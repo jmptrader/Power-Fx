@@ -3,6 +3,7 @@
 
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using Microsoft.PowerFx.Core.App.ErrorContainers;
 using Microsoft.PowerFx.Core.Binding;
@@ -14,10 +15,10 @@ using Microsoft.PowerFx.Core.Functions.Delegation;
 using Microsoft.PowerFx.Core.Functions.Delegation.DelegationMetadata;
 using Microsoft.PowerFx.Core.Functions.FunctionArgValidators;
 using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
+using Microsoft.PowerFx.Core.Types.Enums;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
 namespace Microsoft.PowerFx.Core.Texl.Builtins
 {
@@ -31,7 +32,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
         public override bool SupportsParamCoercion => false;
 
         public SortByColumnsFunction()
-            : base("SortByColumns", TexlStrings.AboutSortByColumns, FunctionCategories.Table, DType.EmptyTable, 0, 2, int.MaxValue, DType.EmptyTable, DType.String)
+            : base("SortByColumns", TexlStrings.AboutSortByColumns, FunctionCategories.Table, DType.EmptyTable, 0, 2, int.MaxValue, DType.EmptyTable, DType.String, BuiltInEnums.SortOrderEnum.OptionSetType)
         {
             _sortOrderValidator = ArgValidators.SortOrderValidator;
 
@@ -39,13 +40,16 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             SignatureConstraint = new SignatureConstraint(omitStartIndex: 5, repeatSpan: 2, endNonRepeatCount: 0, repeatTopLength: 9);
         }
 
-        public override bool RequiresErrorContext => true;
-
         public override IEnumerable<TexlStrings.StringGetter[]> GetSignatures()
         {
             // Enumerate just the base overloads (the first 2 possibilities).
             yield return new[] { TexlStrings.SortByColumnsArg1, TexlStrings.SortByColumnsArg2 };
             yield return new[] { TexlStrings.SortByColumnsArg1, TexlStrings.SortByColumnsArg2, TexlStrings.SortByColumnsArg3 };
+        }
+
+        public override IEnumerable<string> GetRequiredEnumNames()
+        {
+            return new List<string>() { LanguageConstants.SortOrderEnumString };
         }
 
         public override IEnumerable<TexlStrings.StringGetter[]> GetSignatures(int arity)
@@ -58,7 +62,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             return base.GetSignatures(arity);
         }
 
-        public override bool CheckInvocation(TexlBinding binding, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
+        public override bool CheckTypes(CheckTypesContext context, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
         {
             Contracts.AssertValue(args);
             Contracts.AssertAllValues(args);
@@ -67,8 +71,12 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             Contracts.AssertValue(errors);
             Contracts.Assert(MinArity <= args.Length && args.Length <= MaxArity);
 
-            var fValid = CheckInvocation(args, argTypes, errors, out returnType, out nodeToCoercedTypeMap);
+            var fValid = base.CheckTypes(context, args, argTypes, errors, out returnType, out nodeToCoercedTypeMap);
             Contracts.Assert(returnType.IsTable);
+
+            var orderExpectedType = context.Features.StronglyTypedBuiltinEnums ?
+                BuiltInEnums.SortOrderEnum.FormulaType._type :
+                DType.String;
 
             returnType = argTypes[0];
 
@@ -97,7 +105,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
                             sourceType.ReportNonExistingName(FieldNameKind.Logical, errors, columnName, args[i]);
                             fValid = false;
                         }
-                        else if (!columnType.IsPrimitive || columnType.IsOptionSet)
+                        else if (!columnType.IsPrimitive)
                         {
                             fValid = false;
                             errors.EnsureError(colNameArg, TexlStrings.ErrSortWrongType);
@@ -111,10 +119,19 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
                 }
 
                 var nextArgIdx = i + 1;
-                if (nextArgIdx < args.Length && argTypes[nextArgIdx] != DType.String)
+                if (nextArgIdx < args.Length)
                 {
-                    fValid = false;
-                    errors.EnsureError(args[i + 1], TexlStrings.ErrSortIncorrectOrder);
+                    if (!orderExpectedType.Accepts(argTypes[nextArgIdx], exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: context.Features.PowerFxV1CompatibilityRules))
+                    {
+                        fValid = false;
+                        errors.TypeMismatchError(args[i + 1], argTypes[nextArgIdx], argTypes[2]);
+                    }
+                    else if (orderExpectedType.OptionSetInfo is EnumSymbol enumSymbol1)
+                    {
+                        // For implementations, coerce enum option set values to the backing type
+                        var coercionType = enumSymbol1.EnumType.GetEnumSupertype();
+                        CollectionUtils.Add(ref nodeToCoercedTypeMap, args[i + 1], coercionType);
+                    }
                 }
             }
 
@@ -169,7 +186,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
 
             if (binding.IsAsync(node))
             {
-                var message = string.Format("Function:{0}, SortOrderNode is async", Name);
+                var message = string.Format(CultureInfo.InvariantCulture, "Function:{0}, SortOrderNode is async", Name);
                 AddSuggestionMessageToTelemetry(message, node, binding);
                 return false;
             }
@@ -275,7 +292,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             Contracts.AssertValue(metadata);
             Contracts.AssertValid(columnPath);
 
-            order = order.ToLower();
+            order = order.ToLowerInvariant();
 
             // If column is marked as ascending only then return false if order requested is descending.
             return order != LanguageConstants.DescendingSortOrderString || !metadata.IsColumnAscendingOnly(columnPath);
@@ -367,8 +384,6 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
         {
         }
 
-        public override bool RequiresErrorContext => true;
-
         public override string GetUniqueTexlRuntimeName(bool isPrefetching = false)
         {
             return GetUniqueTexlRuntimeName(suffix: "OrderTable");
@@ -379,7 +394,12 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             yield return new[] { TexlStrings.SortByColumnsWithOrderValuesArg1, TexlStrings.SortByColumnsWithOrderValuesArg2, TexlStrings.SortByColumnsWithOrderValuesArg3 };
         }
 
-        public override bool CheckInvocation(TexlBinding binding, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
+        public override IEnumerable<string> GetRequiredEnumNames()
+        {
+            return new List<string>() { LanguageConstants.SortOrderEnumString };
+        }
+
+        public override bool CheckTypes(CheckTypesContext context, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
         {
             Contracts.AssertValue(args);
             Contracts.AssertAllValues(args);
@@ -388,7 +408,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             Contracts.AssertValue(errors);
             Contracts.Assert(MinArity <= args.Length && args.Length <= MaxArity);
 
-            var fValid = CheckInvocation(args, argTypes, errors, out returnType, out nodeToCoercedTypeMap);
+            var fValid = base.CheckTypes(context, args, argTypes, errors, out returnType, out nodeToCoercedTypeMap);
             Contracts.Assert(returnType.IsTable);
 
             returnType = argTypes[0];
@@ -438,7 +458,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             }
 
             var column = columns.Single();
-            if (nameNode != null && columnType.IsValid && !columnType.Accepts(column.Type))
+            if (nameNode != null && columnType.IsValid && !columnType.Accepts(column.Type, exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: context.Features.PowerFxV1CompatibilityRules))
             {
                 errors.EnsureError(
                     DocumentErrorSeverity.Severe,

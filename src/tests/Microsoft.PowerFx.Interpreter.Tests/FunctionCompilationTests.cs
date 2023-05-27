@@ -1,25 +1,23 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-using Microsoft.PowerFx.Core.Public.Types;
-using Microsoft.PowerFx.Core.Types;
-using Microsoft.PowerFx.Interpreter;
+using Microsoft.PowerFx.Core.Tests;
+using Microsoft.PowerFx.Types;
 using Xunit;
 
 namespace Microsoft.PowerFx.Tests
 {
-    public class FunctionCompilationTests
+    public class FunctionCompilationTests : PowerFxTest
     {
         [Theory]
         [InlineData("Switch(A, 2, \"two\", \"other\")")]
         [InlineData("IfError(Text(A), Switch(FirstError.Kind, ErrorKind.Div0, \"Division by zero\", ErrorKind.Numeric, \"Numeric error\", \"Other error\"))")]
         public void TestSwitchFunctionCompilation(string expression)
         {
-            var engine = new RecalcEngine();
-            engine.UpdateVariable("A", 15);
+            var engine = new RecalcEngine(new PowerFxConfig(Features.None));
+            engine.UpdateVariable("A", 15m);
             var check = engine.Check(expression);
             Assert.True(check.IsSuccess);
-            Assert.Null(check.Errors);
             Assert.Equal(FormulaType.String, check.ReturnType);
         }
     }

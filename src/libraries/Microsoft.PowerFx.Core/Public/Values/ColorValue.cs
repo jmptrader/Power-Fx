@@ -1,12 +1,13 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System;
 using System.Diagnostics.Contracts;
 using System.Drawing;
+using System.Text;
 using Microsoft.PowerFx.Core.IR;
-using Microsoft.PowerFx.Core.Public.Types;
 
-namespace Microsoft.PowerFx.Core.Public.Values
+namespace Microsoft.PowerFx.Types
 {
     public class ColorValue : PrimitiveValue<Color>
     {
@@ -19,6 +20,11 @@ namespace Microsoft.PowerFx.Core.Public.Values
         public override void Visit(IValueVisitor visitor)
         {
             visitor.Visit(this);
+        }
+
+        public override void ToExpression(StringBuilder sb, FormulaValueSerializerSettings settings)
+        {
+            sb.Append($"RGBA({Value.R},{Value.G},{Value.B},{Math.Round(Value.A / 255.0, 3)})");
         }
     }
 }

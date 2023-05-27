@@ -1,7 +1,8 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-using Microsoft.PowerFx.Core.Public.Values;
+using Microsoft.PowerFx.Core.Binding;
+using Microsoft.PowerFx.Types;
 
 namespace Microsoft.PowerFx
 {
@@ -12,29 +13,23 @@ namespace Microsoft.PowerFx
         FormulaValue Resolve(string name);
     }
 
-    internal class RecordScope : IScope
+    internal class FormulaValueScope : IScope
     {
-        public readonly RecordValue _context;
+        public readonly FormulaValue _context;
 
-        public RecordScope(RecordValue context)
+        public FormulaValueScope(FormulaValue context)
         {
             _context = context;
         }
 
         public virtual FormulaValue Resolve(string name)
         {
-            // Derived class can have more optimized lookup.
-
-            // $$$ avoid throwing (so we can chain). NEed a "TryLookup"
-            foreach (var field in _context.Fields)
+            if (_context is RecordValue recorValue && name != string.Empty)
             {
-                if (name == field.Name)
-                {
-                    return field.Value;
-                }
+                return recorValue.GetField(name);
             }
 
-            return null;
+            return _context;
         }
     }
 }

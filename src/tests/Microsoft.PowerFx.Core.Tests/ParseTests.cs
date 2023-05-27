@@ -2,17 +2,17 @@
 // Licensed under the MIT license.
 
 using System;
+using System.Globalization;
 using System.Linq;
-using Microsoft.PowerFx.Core.Lexer;
+using System.Runtime.InteropServices;
 using Microsoft.PowerFx.Core.Localization;
 using Microsoft.PowerFx.Core.Parser;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
+using Microsoft.PowerFx.Syntax;
 using Xunit;
 
-namespace DocumentServer.Core.Tests.Formulas
+namespace Microsoft.PowerFx.Core.Tests
 {
-    public class ParseTests
+    public class ParseTests : PowerFxTest
     {
         [Theory]
         [InlineData("0")]
@@ -46,10 +46,50 @@ namespace DocumentServer.Core.Tests.Formulas
         [InlineData("-123456789")]
         [InlineData("123456789.987654321", "123456789.98765433")]
         [InlineData("-123456789.987654321", "-123456789.98765433")]
+        [InlineData("1.00000000000000000000001", "1")]
         [InlineData("2.E5", "200000")]
         public void TexlParseNumericLiterals(string script, string expected = null)
         {
-            TestRoundtrip(script, expected);
+            TestRoundtrip(script, expected, NodeKind.Error, null, TexlParser.Flags.NumberIsFloat);
+        }
+
+        [Theory]
+        [InlineData("0")]
+        [InlineData("-0")]
+        [InlineData("1")]
+        [InlineData("-1")]
+        [InlineData("1.0", "1")]
+        [InlineData("-1.0", "-1")]
+        [InlineData("1.123456789")]
+        [InlineData("-1.123456789")]
+        [InlineData("0.0", "0")]
+        [InlineData("0.000000", "0")]
+        [InlineData("0.000001", "1E-06")]
+        [InlineData("0.123456789")]
+        [InlineData("-0.0", "-0")]
+        [InlineData("-0.000000", "-0")]
+        [InlineData("-0.000001", "-1E-06")]
+        [InlineData("-0.123456789")]
+        [InlineData("0.99999999")]
+        [InlineData("9.99999999")]
+        [InlineData("-0.99999999")]
+        [InlineData("-9.99999999")]
+        [InlineData("-100")]
+        [InlineData("10e4", "100000")]
+        [InlineData("10e-4", "0.001")]
+        [InlineData("10e+4", "100000")]
+        [InlineData("-10e4", "-100000")]
+        [InlineData("-10e-4", "-0.001")]
+        [InlineData("-10e+4", "-100000")]
+        [InlineData("123456789")]
+        [InlineData("-123456789")]
+        [InlineData("123456789.987654321", "123456789.987654321")]
+        [InlineData("-123456789.987654321", "-123456789.987654321")]
+        [InlineData("1.00000000000000000000001", "1.00000000000000000000001")]
+        [InlineData("2.E5", "200000")]
+        public void TexlParseDecimalLiterals(string script, string expected = null)
+        {
+            TestRoundtrip(script, expected, NodeKind.Error, null, TexlParser.Flags.None);
         }
 
         [Theory]
@@ -382,7 +422,7 @@ namespace DocumentServer.Core.Tests.Formulas
         {
             // The language does not / no longer supports a null constant.
             // Out-of-context nulls are parsed as unbound identifiers.
-            TestRoundtrip(script, expectedNodeKind: expectedNodeKind);
+            TestRoundtrip(script, expectedNodeKind: expectedNodeKind, flags: TexlParser.Flags.DisableReservedKeywords);
         }
 
         [Theory]
@@ -469,11 +509,11 @@ namespace DocumentServer.Core.Tests.Formulas
                     Assert.NotNull(node.AsCall().Head);
                     Assert.True(node.AsCall().Head is Identifier);
                     Assert.False((node.AsCall().Head as Identifier).Namespace.IsRoot);
-                    Assert.Equal("Netflix.Services", (node.AsCall().Head as Identifier).Namespace.ToDottedSyntax("."));
+                    Assert.Equal("Netflix.Services", (node.AsCall().Head as Identifier).Namespace.ToDottedSyntax());
 
                     Assert.NotNull(node.AsCall().HeadNode);
                     Assert.True(node.AsCall().HeadNode is DottedNameNode);
-                    Assert.Equal("Netflix.Services.GetMovieCatalog", node.AsCall().HeadNode.AsDottedName().ToDPath().ToDottedSyntax("."));
+                    Assert.Equal("Netflix.Services.GetMovieCatalog", node.AsCall().HeadNode.AsDottedName().ToDPath().ToDottedSyntax());
                 });
         }
 
@@ -519,6 +559,27 @@ namespace DocumentServer.Core.Tests.Formulas
         }
 
         [Theory]
+        [InlineData("1234+6789+1234")] // Valid parse
+        [InlineData("1234+6789+++++")] // Invalid parse
+        public void MaxExpressionLength(string expr)
+        {
+            var opts = new ParserOptions
+            {
+                 MaxExpressionLength = 10
+            };
+
+            var parseResult = Engine.Parse(expr, options: opts);
+            Assert.False(parseResult.IsSuccess);
+            Assert.True(parseResult.HasError);
+
+            // Only 1 error for being too long.
+            // Any other errors indicate additional work that we shouldn't have done. 
+            var errors = parseResult.Errors;
+            Assert.Single(errors);
+            Assert.Equal("Error 0-14: Expression can't be more than 10 characters. The expression is 14 characters.", errors.First().ToString());
+        }
+
+        [Theory]
         [InlineData("")]
         [InlineData("  ")]
         [InlineData("//LineComment")]
@@ -529,7 +590,7 @@ namespace DocumentServer.Core.Tests.Formulas
             var node = result.Root;
 
             Assert.NotNull(node);
-            Assert.Null(result.Errors);
+            Assert.Empty(result.Errors);
         }
 
         [Theory]
@@ -563,11 +624,11 @@ namespace DocumentServer.Core.Tests.Formulas
             var node = result.Root;
 
             Assert.NotNull(node);
-            Assert.Null(result.Errors);
+            Assert.Empty(result.Errors);
             Assert.True(node is DottedNameNode);
 
             var dotted = node as DottedNameNode;
-            Assert.Equal(dpath, dotted.ToDPath().ToDottedSyntax(punctuator: "."));
+            Assert.Equal(dpath, dotted.ToDPath().ToDottedSyntax());
         }
 
         [Theory]
@@ -670,6 +731,9 @@ namespace DocumentServer.Core.Tests.Formulas
 
         [Theory]
         [InlineData("a = 10")]
+        [InlineData("a = ;")]
+        [InlineData("b=10;a = ;c=3;")]
+        [InlineData("/*b=10*/;a = ;c=3;")]
         [InlineData("Formul@ = 10; b = 20;")]
         [InlineData("a;")]
         [InlineData(";")]
@@ -685,12 +749,21 @@ namespace DocumentServer.Core.Tests.Formulas
             TestFormulasParseError(script);
         }
 
-        internal void TestRoundtrip(string script, string expected = null, NodeKind expectedNodeKind = NodeKind.Error, Action<TexlNode> customTest = null)
+        [Theory]
+        [InlineData("A;B;C", "A ; B ; C")]
+        [InlineData("Foo(1);Bar(2)", "Foo(1) ; Bar(2)")]
+        public void TestChainParse(string script, string expected = null)
         {
-            var result = TexlParser.ParseScript(script);
-            var node = result.Root;
+            TestRoundtrip(script, expected, flags: TexlParser.Flags.EnableExpressionChaining);
+        }
+
+        internal void TestRoundtrip(string script, string expected = null, NodeKind expectedNodeKind = NodeKind.Error, Action<TexlNode> customTest = null, TexlParser.Flags flags = TexlParser.Flags.None)
+        {
+            var result = TexlParser.ParseScript(script, flags: flags);
+            var node = result.Root;            
+                        
             Assert.NotNull(node);
-            Assert.False(result.HasError);
+            Assert.False(result.HasError, result.ParseErrorText);
 
             var startid = node.Id;
 
@@ -718,24 +791,64 @@ namespace DocumentServer.Core.Tests.Formulas
             var result = TexlParser.ParseScript(script);
             Assert.NotNull(result.Root);
             Assert.True(result.HasError);
-            Assert.True(result.Errors.Count >= count);
+            Assert.True(result._errors.Count >= count);
 
             //Assert.IsTrue(result.Errors.All(err => err.ErrorKind == DocumentErrorKind.AXL && err.TextSpan != null));
-            Assert.True(errorMessage == null || result.Errors.Any(err => err.ShortMessage == errorMessage));
+            Assert.True(errorMessage == null || result._errors.Any(err => err.ShortMessage == errorMessage));
         }
 
         internal void TestFormulasParseRoundtrip(string script)
         {
-            var result = TexlParser.ParseFormulasScript(script);
+            var result = TexlParser.ParseFormulasScript(script, new CultureInfo("en-US"));
 
             Assert.False(result.HasError);
         }
 
         internal void TestFormulasParseError(string script)
         {
-            var result = TexlParser.ParseFormulasScript(script);
+            var result = TexlParser.ParseFormulasScript(script, new CultureInfo("en-US"));
 
             Assert.True(result.HasError);
+        }
+
+        [Theory]
+        [InlineData("a = 10ads; b = 123; c = 20;", "c")]
+        [InlineData("a = (; b = 123; c = 20;", "c")]
+        [InlineData("a = (; b = 123; c = );", "b")]
+        [InlineData("a = 10; b = 123; c = 10);", "b")]
+        [InlineData("3r(09 = 10; b = 123; c = 10;", "b")]
+        [InlineData("a = 10; b = (123 ; c = 20;", "c")]
+        [InlineData("a = 10; b = in'valid ; c = 20;", "c")]
+        [InlineData("a = 10; b = in(valid ; c = 20;", "c")]
+        [InlineData("a = 10; b = in)valid ; c = 20;", "c")]
+        [InlineData("a = 10; b = in{valid ; c = 20;", "c")]
+        [InlineData("a = 10; b = in}valid ; c = 20;", "c")]
+        [InlineData("a = 10; b = in'valid", "a")]
+        [InlineData("a = 10; b = 3213d 123123asdf", "a")]
+        [InlineData("a = 10; b = 3213d 123123asdf; c = 23;", "c")]
+        [InlineData("a = 10; b = 3213d 123123asdf;; c = 23;", "c")]
+        [InlineData("a = 10; b = 321;3;d ;;;123123asdf;; c = 23;", "c")]
+        [InlineData("a = 10; b = in'valid ; c = 20; d = also(invalid; e = 44;", "e")]
+        [InlineData("a = 10; b = 30; c = in'valid ; d = (10; e = 42;", "e")]
+        public void TestFormulaParseRestart(string script, string key)
+        {
+            var formulasResult = TexlParser.ParseFormulasScript(script);
+            Assert.True(formulasResult.HasError);
+
+            // Parser restarted, and found 'c' correctly
+            Assert.Contains(formulasResult.NamedFormulas, kvp => kvp.Key.Name.Value == key);
+        }
+
+        [Theory]
+        [InlineData("a = 10;; b = in'valid ;; c = 20", "c")]
+        [InlineData("a = 10;; b = in'valid ;; c = 20;; d = also(invalid;; e = 44;;", "e")]
+        public void TestFormulaParseRestart2(string script, string key)
+        {
+            var formulasResult = TexlParser.ParseFormulasScript(script, new CultureInfo("fr-FR"));
+            Assert.True(formulasResult.HasError);
+
+            // Parser restarted, and found 'c' correctly
+            Assert.Contains(formulasResult.NamedFormulas, kvp => kvp.Key.Name.Value == key);
         }
     }
 }

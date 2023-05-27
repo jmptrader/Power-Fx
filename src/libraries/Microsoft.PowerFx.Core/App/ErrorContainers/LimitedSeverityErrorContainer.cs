@@ -4,8 +4,8 @@
 using System.Collections.Generic;
 using Microsoft.PowerFx.Core.Errors;
 using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
+using Microsoft.PowerFx.Syntax;
 
 namespace Microsoft.PowerFx.Core.App.ErrorContainers
 {
@@ -73,6 +73,16 @@ namespace Microsoft.PowerFx.Core.App.ErrorContainers
             {
                 _errors.Errors(node, nodeType, schemaDifference, schemaDifferenceType);
             }
+        }
+
+        public TexlError EnsureError(DocumentErrorSeverity severity, Token token, ErrorResourceKey errKey, params object[] args)
+        {
+            if (severity <= _maximumSeverity)
+            {
+                return _errors.EnsureError(severity, token, errKey, args);
+            }
+
+            return null;
         }
     }
 }

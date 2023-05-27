@@ -1,16 +1,14 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using Microsoft.PowerFx.Core.Public.Types;
+using Microsoft.PowerFx.Core.Tests;
+using Microsoft.PowerFx.Types;
 using Xunit;
 
 namespace Microsoft.PowerFx.Tests
 {
-    public class DependencyFinderTests
+    public class DependencyFinderTests : PowerFxTest
     {
         [Theory]
         [InlineData("A + 3 + B + B", "A,B")]
@@ -24,10 +22,10 @@ namespace Microsoft.PowerFx.Tests
 
             var engine = new RecalcEngine();
 
-            var accountType = new TableType()
+            var accountType = TableType.Empty()
                 .Add(new NamedFormulaType("Age", FormulaType.Number));
 
-            var type = new RecordType()
+            var type = RecordType.Empty()
                 .Add(new NamedFormulaType("A", FormulaType.Number))
                 .Add(new NamedFormulaType("B", FormulaType.Number))
                 .Add(new NamedFormulaType("Accounts", accountType));

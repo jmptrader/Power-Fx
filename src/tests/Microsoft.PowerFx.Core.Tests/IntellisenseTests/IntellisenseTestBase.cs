@@ -1,17 +1,13 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
-using Microsoft.PowerFx.Core;
-using Microsoft.PowerFx.Core.Binding;
-using Microsoft.PowerFx.Core.Glue;
-using Microsoft.PowerFx.Core.Parser;
-using Microsoft.PowerFx.Core.Public.Types;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Texl.Intellisense;
+using Microsoft.PowerFx.Core.Tests;
 using Microsoft.PowerFx.Core.Types;
-using Microsoft.PowerFx.Core.Types.Enums;
+using Microsoft.PowerFx.Intellisense;
+using Microsoft.PowerFx.Types;
 using Xunit;
 
 namespace Microsoft.PowerFx.Tests.IntellisenseTests
@@ -19,7 +15,7 @@ namespace Microsoft.PowerFx.Tests.IntellisenseTests
     /// <summary>
     /// Provides methods that may be used by Intellisense tests.
     /// </summary>
-    public class IntellisenseTestBase
+    public class IntellisenseTestBase : PowerFxTest
     {
         /// <summary>
         /// This method receives a test case string, along with an optional context type that defines the valid
@@ -28,16 +24,8 @@ namespace Microsoft.PowerFx.Tests.IntellisenseTests
         /// <param name="expression"></param>
         /// <param name="contextTypeString"></param>
         /// <returns></returns>
-        internal IIntellisenseResult Suggest(string expression, EnumStore enumStore, string contextTypeString = null)
+        internal IIntellisenseResult Suggest(string expression, PowerFxConfig config, CultureInfo culture, string contextTypeString = null)
         {
-            Assert.NotNull(expression);
-
-            var cursorMatches = Regex.Matches(expression, @"\|");
-            Assert.True(cursorMatches.Count == 1, "Invalid cursor.  Exactly one cursor must be specified.");
-            var cursorPosition = cursorMatches.First().Index;
-
-            expression = expression.Replace("|", string.Empty);
-
             RecordType contextType;
             if (contextTypeString != null)
             {
@@ -49,28 +37,50 @@ namespace Microsoft.PowerFx.Tests.IntellisenseTests
             else
             {
                 // We leave the context type as an empty record when none is provided
-                contextType = new RecordType();
+                contextType = RecordType.Empty();
             }
 
-            return Suggest(expression, contextType, cursorPosition, enumStore);
+            return Suggest(expression, config, culture, contextType);
         }
 
-        internal IIntellisenseResult Suggest(string expression, FormulaType parameterType, int cursorPosition, EnumStore enumStore)
+        internal IIntellisenseResult Suggest(string expression, PowerFxConfig config, CultureInfo culture, RecordType parameterType)
         {
-            var formula = new Formula(expression);
-            formula.EnsureParsed(TexlParser.Flags.None);
+            (var expression2, var cursorPosition) = Decode(expression);
+            var symTable = ReadOnlySymbolTable.NewFromRecord(parameterType);
+            return Suggest(expression2, symTable, cursorPosition, config, culture);
+        }
 
-            var binding = TexlBinding.Run(
-                new Glue2DocumentBinderGlue(),
-                formula.ParseTree,
-                new SimpleResolver(enumStore.EnumSymbols),
-                ruleScope: parameterType._type,
-                useThisRecordForRuleScope: false);
+        internal IIntellisenseResult Suggest(string expression, PowerFxConfig config, CultureInfo culture, ReadOnlySymbolTable symTable)
+        {
+            (var expression2, var cursorPosition) = Decode(expression);
+            return Suggest(expression2, symTable, cursorPosition, config, culture);
+        }
 
-            var context = new IntellisenseContext(expression, cursorPosition);
-            var intellisense = IntellisenseProvider.GetIntellisense(enumStore);
-            var suggestions = intellisense.Suggest(context, binding, formula);
+        // Tests use | to indicate cursor position within an expression string. 
+        // Return the cursos position and string (without the |). 
+        internal static (string, int) Decode(string expression)
+        {
+            Assert.NotNull(expression);
 
+            var cursorMatches = Regex.Matches(expression, @"\|");
+            Assert.True(cursorMatches.Count == 1, "Invalid cursor.  Exactly one cursor must be specified.");
+            var cursorPosition = cursorMatches.First().Index;
+
+            expression = expression.Replace("|", string.Empty);
+
+            return (expression, cursorPosition);
+        }
+
+        internal IIntellisenseResult Suggest(string expression, ReadOnlySymbolTable symTable, int cursorPosition, PowerFxConfig config, CultureInfo culture)
+        {
+            var engine = new Engine(config)
+            {
+                SupportedFunctions = new SymbolTable()
+            };
+
+            var checkResult = engine.Check(expression, new ParserOptions(culture), symTable);
+            var suggestions = engine.Suggest(checkResult, cursorPosition);
+            
             if (suggestions.Exception != null)
             {
                 throw suggestions.Exception;

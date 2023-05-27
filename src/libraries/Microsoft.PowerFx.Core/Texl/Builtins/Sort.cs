@@ -14,10 +14,10 @@ using Microsoft.PowerFx.Core.Functions.Delegation.DelegationMetadata;
 using Microsoft.PowerFx.Core.Functions.FunctionArgValidators;
 using Microsoft.PowerFx.Core.Localization;
 using Microsoft.PowerFx.Core.Logging.Trackers;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
+using Microsoft.PowerFx.Core.Types.Enums;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
 namespace Microsoft.PowerFx.Core.Texl.Builtins
 {
@@ -43,7 +43,12 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             yield return new[] { TexlStrings.SortArg1, TexlStrings.SortArg2, TexlStrings.SortArg3 };
         }
 
-        public override bool CheckInvocation(TexlBinding binding, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
+        public override IEnumerable<string> GetRequiredEnumNames()
+        {
+            return new List<string>() { LanguageConstants.SortOrderEnumString };
+        }
+
+        public override bool CheckTypes(CheckTypesContext context, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
         {
             Contracts.AssertValue(args);
             Contracts.AssertAllValues(args);
@@ -52,22 +57,35 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             Contracts.AssertValue(errors);
             Contracts.Assert(MinArity <= args.Length && args.Length <= MaxArity);
 
-            var fValid = CheckInvocation(args, argTypes, errors, out returnType, out nodeToCoercedTypeMap);
+            var fValid = base.CheckTypes(context, args, argTypes, errors, out returnType, out nodeToCoercedTypeMap);
             Contracts.Assert(returnType.IsTable);
 
             returnType = argTypes[0];
 
             var exprType = argTypes[1];
-            if (!exprType.IsPrimitive || exprType.IsOptionSet)
+            if (!exprType.IsPrimitive)
             {
                 fValid = false;
                 errors.EnsureError(args[1], TexlStrings.ErrSortWrongType);
             }
 
-            if (args.Length == 3 && argTypes[2] != DType.String)
+            var orderExpectedType = context.Features.StronglyTypedBuiltinEnums ?
+                BuiltInEnums.SortOrderEnum.FormulaType._type :
+                DType.String;
+
+            if (args.Length == 3)
             {
-                fValid = false;
-                errors.EnsureError(args[2], TexlStrings.ErrSortIncorrectOrder);
+                if (!orderExpectedType.Accepts(argTypes[2], exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: context.Features.PowerFxV1CompatibilityRules))
+                {
+                    fValid = false;
+                    errors.TypeMismatchError(args[2], orderExpectedType, argTypes[2]);
+                }
+                else if (orderExpectedType.OptionSetInfo is EnumSymbol enumSymbol1)
+                {
+                    // For implementations, coerce enum option set values to the backing type
+                    var coercionType = enumSymbol1.EnumType.GetEnumSupertype();
+                    CollectionUtils.Add(ref nodeToCoercedTypeMap, args[2], coercionType);
+                }
             }
 
             return fValid;
@@ -200,61 +218,6 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             return true;
         }
 
-        public static string GetSortComparatorIdForType(DType type)
-        {
-            Contracts.AssertValid(type);
-
-            switch (type.Kind)
-            {
-                case DKind.Boolean:
-                    return "0";
-                case DKind.Number:
-                case DKind.Color:
-                case DKind.Currency:
-                case DKind.Date:
-                case DKind.Time:
-                case DKind.DateTime:
-                    return "1";
-                case DKind.String:
-                case DKind.Image:
-                case DKind.PenImage:
-                case DKind.Hyperlink:
-                case DKind.Media:
-                case DKind.Blob:
-                default:
-                    Contracts.Assert(DType.String.Accepts(type, exact: false));
-                    return "2";
-            }
-        }
-
-        internal static string GenerateColumnNamesMappingForSortByColumns(DType sourceType)
-        {
-            Contracts.Assert(sourceType.IsTable);
-
-            var allColumns = sourceType.GetNames(DPath.Root);
-            var separator = string.Empty;
-
-            var primitiveColumnsAndComparatorIds = new StringBuilder();
-            primitiveColumnsAndComparatorIds.Append("{");
-
-            foreach (var column in allColumns)
-            {
-                if (column.Type.IsPrimitive && !column.Type.IsOptionSet)
-                {
-                    primitiveColumnsAndComparatorIds.AppendFormat(
-                        "{0}\"{1}\":{2}",
-                        separator,
-                        CharacterUtils.EscapeString(column.Name),
-                        GetSortComparatorIdForType(column.Type));
-                    separator = ",";
-                }
-            }
-
-            primitiveColumnsAndComparatorIds.Append("}");
-
-            return primitiveColumnsAndComparatorIds.ToString();
-        }
-
         private bool IsSortOrderSuppportedByColumn(TexlNode node, TexlBinding binding, string order, SortOpMetadata metadata, DPath columnPath)
         {
             Contracts.AssertValue(node);
@@ -278,7 +241,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             Contracts.AssertValue(metadata);
             Contracts.AssertValid(columnPath);
 
-            order = order.ToLower();
+            order = order.ToLowerInvariant();
 
             // If column is marked as ascending only then return false if order requested is descending.
             return order != LanguageConstants.DescendingSortOrderString || !metadata.IsColumnAscendingOnly(columnPath);

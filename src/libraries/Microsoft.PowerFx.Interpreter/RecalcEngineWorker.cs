@@ -4,12 +4,11 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Threading;
 using Microsoft.PowerFx.Core.IR;
-using Microsoft.PowerFx.Core.IR.Nodes;
-using Microsoft.PowerFx.Core.IR.Symbols;
-using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Public.Values;
 using Microsoft.PowerFx.Functions;
+using Microsoft.PowerFx.Interpreter;
+using Microsoft.PowerFx.Types;
 
 namespace Microsoft.PowerFx
 {
@@ -33,6 +32,8 @@ namespace Microsoft.PowerFx
         public RecalcEngineWorker(RecalcEngine parent, CultureInfo cultureInfo = null)
         {
             _parent = parent;
+
+            // $$$ can't use current culture
             _cultureInfo = cultureInfo ?? CultureInfo.CurrentCulture;
         }
 
@@ -44,9 +45,9 @@ namespace Microsoft.PowerFx
             // Dispatch update hooks. 
             foreach (var varName in _sendUpdates.OrderBy(x => x))
             {
-                var info = _parent.Formulas[varName];
+                var info = _parent.GetByName(varName);
 
-                var newValue = info._value;
+                var newValue = _parent.GetValue(varName);
                 info._onUpdate?.Invoke(varName, newValue);
             }
         }
@@ -59,7 +60,7 @@ namespace Microsoft.PowerFx
                 return; // already computed. 
             }
 
-            var fi = _parent.Formulas[name];
+            var fi = _parent.GetByName(name);
 
             // Now calculate this node. Will recalc any dependencies if needed.                 
             if (fi._binding != null)
@@ -69,22 +70,26 @@ namespace Microsoft.PowerFx
                 (var irnode, var ruleScopeSymbol) = IRTranslator.Translate(binding);
 
                 var scope = this;
-                var v = new EvalVisitor(_cultureInfo);
+                var symbols = _parent._symbolValues;
+                var runtimeConfig = new RuntimeConfig(symbols, _cultureInfo);                             
 
-                var newValue = irnode.Accept(v, SymbolContext.New());
+                var v = new EvalVisitor(runtimeConfig, CancellationToken.None);
 
-                var equal = fi._value != null && // null on initial run. 
-                    RuntimeHelpers.AreEqual(newValue, fi._value);
+                var newValue = irnode.Accept(v, new EvalVisitorContext(SymbolContext.New(), new StackDepthCounter(_parent.Config.MaxCallDepth))).Result;
+
+                var val = _parent.GetValue(name);
+                var equal = val is BlankValue && // blank on initial run. 
+                    RuntimeHelpers.AreEqual(newValue, val);
 
                 if (!equal)
                 {
                     _sendUpdates.Add(name);
-                }
 
-                fi._value = newValue;
+                    _parent._symbolValues.Set(fi.Slot, newValue);
+                }
             }
 
-            _calcs[name] = fi._value;
+            _calcs[name] = _parent.GetValue(name);
         }
 
         // Recalc Name and any downstream formulas that may now be updated.
@@ -92,7 +97,7 @@ namespace Microsoft.PowerFx
         {
             RecalcWorker2(name);
 
-            var fi = _parent.Formulas[name];
+            var fi = _parent.GetByName(name);
 
             // Propagate changes.
             foreach (var x in fi._usedBy)

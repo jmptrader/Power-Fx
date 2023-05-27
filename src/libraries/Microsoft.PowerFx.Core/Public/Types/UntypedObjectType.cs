@@ -6,7 +6,7 @@ using System.Collections.Generic;
 using System.Text;
 using Microsoft.PowerFx.Core.Types;
 
-namespace Microsoft.PowerFx.Core.Public.Types
+namespace Microsoft.PowerFx.Types
 {
     public class UntypedObjectType : FormulaType
     {
@@ -15,7 +15,7 @@ namespace Microsoft.PowerFx.Core.Public.Types
         {
         }
 
-        public override void Visit(ITypeVistor vistor)
+        public override void Visit(ITypeVisitor vistor)
         {
             vistor.Visit(this);
         }

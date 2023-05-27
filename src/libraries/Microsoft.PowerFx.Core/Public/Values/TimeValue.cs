@@ -3,13 +3,16 @@
 
 using System;
 using System.Diagnostics.Contracts;
+using System.Globalization;
+using System.Text;
 using Microsoft.PowerFx.Core.IR;
-using Microsoft.PowerFx.Core.Public.Types;
 
-namespace Microsoft.PowerFx.Core.Public.Values
+namespace Microsoft.PowerFx.Types
 {
     public class TimeValue : PrimitiveValue<TimeSpan>
     {
+        private const string ExpressionFormat = "Time({0},{1},{2},{3})";
+
         internal TimeValue(IRContext irContext, TimeSpan ts)
             : base(irContext, ts)
         {
@@ -19,6 +22,17 @@ namespace Microsoft.PowerFx.Core.Public.Values
         public override void Visit(IValueVisitor visitor)
         {
             visitor.Visit(this);
+        }
+
+        public override void ToExpression(StringBuilder sb, FormulaValueSerializerSettings settings)
+        {
+            var valueToConvert = Value;
+            if (valueToConvert < TimeSpan.Zero)
+            {
+                valueToConvert = valueToConvert.Add(TimeSpan.FromDays(-valueToConvert.Days + 1));
+            }
+
+            sb.Append(string.Format(CultureInfo.InvariantCulture, ExpressionFormat, valueToConvert.Hours, valueToConvert.Minutes, valueToConvert.Seconds, valueToConvert.Milliseconds));
         }
     }
 }

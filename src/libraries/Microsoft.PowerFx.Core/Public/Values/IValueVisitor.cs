@@ -1,13 +1,15 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-namespace Microsoft.PowerFx.Core.Public.Values
+namespace Microsoft.PowerFx.Types
 {
     public interface IValueVisitor
     {
         void Visit(BlankValue value);
 
         void Visit(NumberValue value);
+
+        void Visit(DecimalValue value);
 
         void Visit(BooleanValue value);
 

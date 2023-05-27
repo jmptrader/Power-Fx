@@ -3,94 +3,98 @@
 
 using System;
 using System.Collections.Generic;
-using System.Collections.Immutable;
 using System.Linq;
-using Microsoft.PowerFx.Core;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.PowerFx.Core.Binding;
 using Microsoft.PowerFx.Core.Entities;
-using Microsoft.PowerFx.Core.Functions;
-using Microsoft.PowerFx.Core.Glue;
 using Microsoft.PowerFx.Core.IR;
-using Microsoft.PowerFx.Core.IR.Nodes;
-using Microsoft.PowerFx.Core.IR.Symbols;
-using Microsoft.PowerFx.Core.Lexer;
-using Microsoft.PowerFx.Core.Localization;
 using Microsoft.PowerFx.Core.Parser;
-using Microsoft.PowerFx.Core.Public;
-using Microsoft.PowerFx.Core.Public.Types;
-using Microsoft.PowerFx.Core.Public.Values;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Texl;
-using Microsoft.PowerFx.Core.Texl.Intellisense;
-using Microsoft.PowerFx.Core.Types;
+using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Functions;
+using Microsoft.PowerFx.Interpreter;
+using Microsoft.PowerFx.Interpreter.UDF;
+using Microsoft.PowerFx.Types;
 
 namespace Microsoft.PowerFx
 {
     /// <summary>
     /// Holds a set of Power Fx variables and formulas. Formulas are recalculated when their dependent variables change.
     /// </summary>
-    public class RecalcEngine : IScope, IPowerFxEngine
+    public sealed class RecalcEngine : Engine
     {
-        internal Dictionary<string, RecalcFormulaInfo> Formulas { get; } = new Dictionary<string, RecalcFormulaInfo>();
+        // Map SlotIndex --> Value
+        internal Dictionary<int, RecalcFormulaInfo> Formulas { get; } = new Dictionary<int, RecalcFormulaInfo>();
 
-        private readonly PowerFxConfig _powerFxConfig;
+        internal readonly SymbolTable _symbolTable;
+        internal readonly SymbolValues _symbolValues;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="RecalcEngine"/> class.
         /// Create a new power fx engine. 
         /// </summary>
-        /// <param name="powerFxConfig">Compiler customizations.</param>
-        public RecalcEngine(PowerFxConfig powerFxConfig = null)
+        public RecalcEngine()
+            : this(new PowerFxConfig())
         {
-            powerFxConfig = powerFxConfig ?? new PowerFxConfig(null);
-            AddInterpreterFunctions(powerFxConfig);
-            powerFxConfig.Lock();
-            _powerFxConfig = powerFxConfig;
         }
 
-        // Add Builtin functions that aren't yet in the shared library. 
-        private void AddInterpreterFunctions(PowerFxConfig powerFxConfig)
+        public RecalcEngine(PowerFxConfig powerFxConfig)
+            : base(powerFxConfig)
         {
-            powerFxConfig.AddFunction(BuiltinFunctionsCore.Index_UO);
-            powerFxConfig.AddFunction(BuiltinFunctionsCore.ParseJson);
-            powerFxConfig.AddFunction(BuiltinFunctionsCore.Table_UO);
-            powerFxConfig.AddFunction(BuiltinFunctionsCore.Text_UO);
-            powerFxConfig.AddFunction(BuiltinFunctionsCore.Value_UO);
-            powerFxConfig.AddFunction(BuiltinFunctionsCore.Boolean);
-            powerFxConfig.AddFunction(BuiltinFunctionsCore.Boolean_UO);
+            _symbolTable = new SymbolTable { DebugName = "Globals" };
+            _symbolValues = new SymbolValues(_symbolTable);
+            _symbolValues.OnUpdate += OnSymbolValuesOnUpdate;
+
+            base.EngineSymbols = _symbolTable;
+
+            // Add Builtin functions that aren't yet in the shared library. 
+            SupportedFunctions = _interpreterSupportedFunctions;
         }
 
-        /// <summary>
-        /// List all functions (both builtin and custom) registered with this evaluator. 
-        /// </summary>
-        public IEnumerable<string> GetAllFunctionNames()
-        {
-            foreach (var kv in _powerFxConfig.ExtraFunctions)
-            {
-                yield return kv.Value.Name;
-            }
+        // Expose publicly. 
+        public new ReadOnlySymbolTable EngineSymbols => base.EngineSymbols; 
 
-            foreach (var func in Functions.Library.FunctionList)
-            {
-                yield return func.Name;
-            }
+        // Set of default functions supported by the interpreter. 
+        private static readonly ReadOnlySymbolTable _interpreterSupportedFunctions = ReadOnlySymbolTable.NewDefault(Library.FunctionList);
+
+        // For internal testing
+        internal INameResolver TestCreateResolver()
+        {
+            return CreateResolverInternal();
         }
 
-        // This handles lookups in the global scope. 
-        FormulaValue IScope.Resolve(string name)
+        // Event handler fired when we update symbol values. 
+        private void OnSymbolValuesOnUpdate(ISymbolSlot slot, FormulaValue arg2)
         {
-            if (Formulas.TryGetValue(name, out var info))
+            if (Formulas.TryGetValue(slot.SlotIndex, out var info))
             {
-                return info._value;
+                if (!info.IsFormula)
+                {
+                    // IF we've updated a non-formula (variable), then trigger the recalc chain.
+                    // Cascading formula recalc will be triggered by Recalc chain. 
+                    Recalc(info.Name);
+                }
             }
-
-            // Binder should have caught. 
-            throw new InvalidOperationException($"Can't resolve '{name}'");
         }
 
         public void UpdateVariable(string name, double value)
         {
             UpdateVariable(name, new NumberValue(IRContext.NotInSource(FormulaType.Number), value));
+        }
+
+        public void UpdateVariable(string name, decimal value)
+        {
+            UpdateVariable(name, new DecimalValue(IRContext.NotInSource(FormulaType.Decimal), value));
+        }
+
+        public void UpdateVariable(string name, int value)
+        {
+            UpdateVariable(name, new NumberValue(IRContext.NotInSource(FormulaType.Number), value));
+        }
+
+        public void UpdateVariable(string name, long value)
+        {
+            UpdateVariable(name, new DecimalValue(IRContext.NotInSource(FormulaType.Decimal), value));
         }
 
         /// <summary>
@@ -102,89 +106,23 @@ namespace Microsoft.PowerFx
         {
             var x = value;
 
-            if (Formulas.TryGetValue(name, out var fi))
+            if (TryGetByName(name, out var fi))
             {
-                // Type should match?
-                if (fi._type != x.Type)
-                {
-                    throw new NotSupportedException($"Can't change '{name}''s type from {fi._type} to {x.Type}.");
-                }
-
-                fi._value = x;
+                // Set() will validate type compatibility
+                _symbolValues.Set(fi.Slot, value);
 
                 // Be sure to preserve used-by set. 
             }
             else
             {
-                Formulas[name] = new RecalcFormulaInfo { _value = x, _type = x.IRContext.ResultType };
+                // New
+                var slot = _symbolTable.AddVariable(name, value.Type, mutable: true);
+
+                Formulas[slot.SlotIndex] = RecalcFormulaInfo.NewVariable(slot, name, x.IRContext.ResultType);
+                _symbolValues.Set(slot, value);
             }
 
-            // Could trigger recalcs?
-            Recalc(name);
-        }
-
-        /// <summary>
-        /// Type check a formula without executing it. 
-        /// </summary>
-        /// <param name="expressionText"></param>
-        /// <param name="parameters"></param>
-        /// <returns></returns>
-        public CheckResult Check(string expressionText, FormulaType parameterType = null)
-        {
-            return CheckInternal(expressionText, parameterType, intellisense: false);
-        }
-
-        private CheckResult CheckInternal(string expressionText, FormulaType parameterType = null, bool intellisense = false)
-        {
-            if (parameterType == null)
-            {
-                parameterType = new RecordType();
-            }
-
-            var formula = new Formula(expressionText);
-
-            formula.EnsureParsed(TexlParser.Flags.None);
-
-            // Ok to continue with binding even if there are parse errors. 
-            // We can still use that for intellisense. 
-
-            var resolver = new RecalcEngineResolver(this, _powerFxConfig, (RecordType)parameterType);
-
-            var binding = TexlBinding.Run(
-                new Glue2DocumentBinderGlue(),
-                formula.ParseTree,
-                resolver,
-                ruleScope: parameterType._type,
-                useThisRecordForRuleScope: false);
-
-            var errors = formula.HasParseErrors ? formula.GetParseErrors() : binding.ErrorContainer.GetErrors();
-
-            var result = new CheckResult
-            {
-                _binding = binding,
-                _formula = formula,
-            };
-
-            if (errors != null && errors.Any())
-            {
-                result.SetErrors(errors.ToArray());
-                result.Expression = null;
-            }
-            else
-            {
-                result.TopLevelIdentifiers = DependencyFinder.FindDependencies(binding.Top, binding);
-
-                // TODO: Fix FormulaType.Build to not throw exceptions for Enum types then remove this check
-                if (binding.ResultType.Kind != DKind.Enum)
-                {
-                    result.ReturnType = FormulaType.Build(binding.ResultType);
-                }
-
-                (var irnode, var ruleScopeSymbol) = IRTranslator.Translate(result._binding);
-                result.Expression = new ParsedExpression(irnode, ruleScopeSymbol);
-            }
-
-            return result;
+            // Recalc was triggered by SymbolValue Set's OnUpdate handler. 
         }
 
         /// <summary>
@@ -193,71 +131,141 @@ namespace Microsoft.PowerFx
         /// <param name="expressionText">textual representation of the formula.</param>
         /// <param name="parameters">parameters for formula. The fields in the parameter record can 
         /// be acecssed as top-level identifiers in the formula.</param>
+        /// <param name="options"></param>
         /// <returns>The formula's result.</returns>
-        public FormulaValue Eval(string expressionText, RecordValue parameters = null)
+        public FormulaValue Eval(string expressionText, RecordValue parameters = null, ParserOptions options = null)
+        {
+            return EvalAsync(expressionText, CancellationToken.None, parameters, options).Result;
+        }
+
+        public async Task<FormulaValue> EvalAsync(string expressionText, CancellationToken cancellationToken, RecordValue parameters, ParserOptions options = null)
         {
             if (parameters == null)
             {
                 parameters = RecordValue.Empty();
             }
 
-            var check = Check(expressionText, parameters.IRContext.ResultType);
+            var symbolValues = ReadOnlySymbolValues.NewFromRecord(parameters);
+            var runtimeConfig = new RuntimeConfig(symbolValues);
+
+            return await EvalAsync(expressionText, cancellationToken, options, null, runtimeConfig).ConfigureAwait(false);
+        }
+
+        public async Task<FormulaValue> EvalAsync(string expressionText, CancellationToken cancellationToken, ReadOnlySymbolValues runtimeConfig)
+        {
+            var runtimeConfig2 = new RuntimeConfig(runtimeConfig);
+            return await EvalAsync(expressionText, cancellationToken, runtimeConfig: runtimeConfig2).ConfigureAwait(false);
+        }
+
+        public async Task<FormulaValue> EvalAsync(string expressionText, CancellationToken cancellationToken, ParserOptions options = null, ReadOnlySymbolTable symbolTable = null, RuntimeConfig runtimeConfig = null)
+        {
+            // We could have any combination of symbols and runtime values. 
+            // - RuntimeConfig may be null if we don't need it. 
+            // - Some Symbols are metadata-only (like option sets, UDFs, constants, etc)
+            // and hence don't require a corresponnding runtime Symbol Value. 
+            var parameterSymbols = runtimeConfig?.Values?.SymbolTable;
+            var symbolsAll = ReadOnlySymbolTable.Compose(parameterSymbols, symbolTable);
+
+            options ??= this.GetDefaultParserOptionsCopy();
+
+            var check = Check(expressionText, options, symbolsAll);
             check.ThrowOnErrors();
 
-            var newValue = check.Expression.Eval(parameters);
-            return newValue;
+            var stackMarker = new StackDepthCounter(Config.MaxCallDepth);
+            var eval = check.GetEvaluator(stackMarker);
+
+            var result = await eval.EvalAsync(cancellationToken, runtimeConfig).ConfigureAwait(false);
+            return result;
+        }
+
+        public DefineFunctionsResult DefineFunctions(string script, bool numberIsFloat = false)
+        {
+            var parsedUDFS = new Core.Syntax.ParsedUDFs(script, numberIsFloat: numberIsFloat);
+            var result = parsedUDFS.GetParsed();
+            var errors = result.Errors?.ToList();
+            var comments = new List<Syntax.CommentToken>();
+
+            var udfDefinitions = result.UDFs.Select(udf => new UDFDefinition(
+                udf.Ident.ToString(),
+                new ParseResult(udf.Body, errors, result.HasError, comments, null, null, script),
+                udf.ReturnType.GetFormulaType(),
+                udf.IsImperative,
+                udf.NumberIsFloat,
+                udf.Args.Select(arg => new NamedFormulaType(arg.NameIdent.ToString(), arg.TypeIdent.GetFormulaType())).ToArray())).ToArray();
+
+            return DefineFunctions(udfDefinitions);
         }
 
         /// <summary>
-        /// Convert references in an expression to the invariant form.
+        /// For private use because we don't want anyone defining a function without binding it.
         /// </summary>
-        /// <param name="expressionText">textual representation of the formula.</param>
-        /// <param name="parameters">Type of parameters for formula. The fields in the parameter record can 
-        /// be acecssed as top-level identifiers in the formula. If DisplayNames are used, make sure to have that mapping
-        /// as part of the RecordType.
-        /// <returns>The formula, with all identifiers converted to invariant form</returns>
-        public string GetInvariantExpression(string expressionText, RecordType parameters)
+        /// <returns></returns>
+        private UDFLazyBinder DefineFunction(UDFDefinition definition)
         {
-            return ConvertExpression(expressionText, parameters, toDisplayNames: false);
-        }
-
-        /// <summary>
-        /// Convert references in an expression to the display form.
-        /// </summary>
-        /// <param name="expressionText">textual representation of the formula.</param>
-        /// <param name="parameters">Type of parameters for formula. The fields in the parameter record can 
-        /// be acecssed as top-level identifiers in the formula. If DisplayNames are used, make sure to have that mapping
-        /// as part of the RecordType.
-        /// <returns>The formula, with all identifiers converted to display form</returns>
-        public string GetDisplayExpression(string expressionText, RecordType parameters)
-        {
-            return ConvertExpression(expressionText, parameters, toDisplayNames: true);
-        }
-
-        private string ConvertExpression(string expressionText, RecordType parameters, bool toDisplayNames)
-        {
-            var formula = new Formula(expressionText);
-            formula.EnsureParsed(TexlParser.Flags.None);
-
-            var resolver = new RecalcEngineResolver(this, _powerFxConfig, parameters);
-            var binding = TexlBinding.Run(
-                new Glue2DocumentBinderGlue(),
-                null,
-                new Core.Entities.QueryOptions.DataSourceToQueryOptionsMap(),
-                formula.ParseTree,
-                resolver,
-                ruleScope: parameters._type,
-                useThisRecordForRuleScope: false,
-                updateDisplayNames: toDisplayNames,
-                forceUpdateDisplayNames: toDisplayNames);
-
-            Dictionary<Span, string> worklist = new ();
-            foreach (var token in binding.NodesToReplace)
+            // $$$ Would be a good helper function 
+            var record = RecordType.Empty();
+            foreach (var p in definition.Parameters)
             {
-                worklist.Add(token.Key.Span, TexlLexer.EscapeName(token.Value));
+                record = record.Add(p);
             }
 
-            return Span.ReplaceSpans(expressionText, worklist);
+            var check = new CheckWrapper(this, definition.ParseResult, record, definition.IsImperative, definition.NumberIsFloat);
+
+            var func = new UserDefinedTexlFunction(definition.Name, definition.ReturnType, definition.Parameters, check);
+
+            if (_symbolTable.Functions.AnyWithName(definition.Name))
+            {
+                throw new InvalidOperationException($"Function {definition.Name} is already defined");
+            }
+
+            _symbolTable.AddFunction(func);
+            return new UDFLazyBinder(func, definition.Name);
+        }
+
+        private void RemoveFunction(string name)
+        {
+            _symbolTable.RemoveFunction(name);
+        }
+
+        /// <summary>
+        /// Tries to define and bind all the functions here. If any function names conflict returns an expression error. 
+        /// Also returns any errors from binding failing. All functions defined here are removed if any of them contain errors.
+        /// </summary>
+        /// <param name="udfDefinitions"></param>
+        /// <returns></returns>
+        internal DefineFunctionsResult DefineFunctions(IEnumerable<UDFDefinition> udfDefinitions)
+        {
+            var expressionErrors = new List<ExpressionError>();
+
+            var binders = new List<UDFLazyBinder>();
+            foreach (UDFDefinition definition in udfDefinitions)
+            {
+                binders.Add(DefineFunction(definition));
+            }
+
+            foreach (UDFLazyBinder lazyBinder in binders)
+            {
+                var possibleErrors = lazyBinder.Bind();
+                if (possibleErrors.Any())
+                {
+                    expressionErrors.AddRange(possibleErrors);
+                }
+            }
+
+            if (expressionErrors.Any())
+            {
+                foreach (UDFLazyBinder lazyBinder in binders)
+                {
+                    RemoveFunction(lazyBinder.Name);
+                }
+            }
+
+            return new DefineFunctionsResult(expressionErrors, binders.Select(binder => new FunctionInfo(binder.Function)));
+        }
+
+        internal DefineFunctionsResult DefineFunctions(params UDFDefinition[] udfDefinitions)
+        {
+            return DefineFunctions(udfDefinitions.AsEnumerable());
         }
 
         // Invoke onUpdate() each time this formula is changed, passing in the new value. 
@@ -274,14 +282,12 @@ namespace Microsoft.PowerFx
         /// <param name="onUpdate">Callback to fire when this value is updated.</param>
         public void SetFormula(string name, FormulaWithParameters expr, Action<string, FormulaValue> onUpdate)
         {
-            if (Formulas.ContainsKey(name))
-            {
-                throw new InvalidOperationException($"Can't change existing formula: {name}");
-            }
-
             var check = Check(expr._expression, expr._schema);
             check.ThrowOnErrors();
-            var binding = check._binding;
+            var binding = check.Binding;
+
+            // This will fail if it already exists 
+            var slot = _symbolTable.AddVariable(name, check.ReturnType, mutable: false);
 
             // We can't have cycles because:
             // - formulas can only refer to already-defined values
@@ -289,38 +295,16 @@ namespace Microsoft.PowerFx
             var dependsOn = check.TopLevelIdentifiers;
 
             var type = FormulaType.Build(binding.ResultType);
-            var info = new RecalcFormulaInfo
-            {
-                _dependsOn = dependsOn,
-                _type = type,
-                _binding = binding,
-                _onUpdate = onUpdate
-            };
+            var info = RecalcFormulaInfo.NewFormula(slot, name, type, dependsOn, binding, onUpdate);
 
-            Formulas[name] = info;
+            Formulas[slot.SlotIndex] = info;
 
             foreach (var x in dependsOn)
             {
-                Formulas[x]._usedBy.Add(name);
+                GetByName(x)._usedBy.Add(name);
             }
 
             Recalc(name);
-        }
-
-        /// <summary>
-        /// Get intellisense from the formula.
-        /// </summary>
-        public IIntellisenseResult Suggest(string expression, FormulaType parameterType, int cursorPosition)
-        {
-            var result = CheckInternal(expression, parameterType, intellisense: true);
-            var binding = result._binding;
-            var formula = result._formula;
-
-            var context = new IntellisenseContext(expression, cursorPosition);
-            var intellisense = IntellisenseProvider.GetIntellisense(_powerFxConfig.EnumStore);
-            var suggestions = intellisense.Suggest(context, binding, formula);
-
-            return suggestions;
         }
 
         // Trigger a recalc on name and anything that depends on it. 
@@ -331,9 +315,39 @@ namespace Microsoft.PowerFx
             r.Recalc(name);
         }
 
+        /// <summary>
+        /// Delete formula that was previously created.
+        /// </summary>
+        /// <param name="name">Formula name.</param>
         public void DeleteFormula(string name)
         {
-            throw new NotImplementedException();
+            if (TryGetByName(name, out var fi))
+            {
+                if (fi._usedBy.Count == 0)
+                {
+                    if (fi._dependsOn != null)
+                    {
+                        foreach (var dependsOnName in fi._dependsOn)
+                        {
+                            if (TryGetByName(dependsOnName, out var info))
+                            {
+                                info._usedBy.Remove(name);
+                            }
+                        }
+                    }
+
+                    Formulas.Remove(fi.Slot.SlotIndex);
+                    _symbolTable.RemoveVariable(name);
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Formula {name} cannot be deleted due to the following dependencies: {string.Join(", ", fi._usedBy)}");
+                }
+            }
+            else
+            {
+                throw new InvalidOperationException($"Formula {name} does not exist");
+            }
         }
 
         /// <summary>
@@ -343,8 +357,49 @@ namespace Microsoft.PowerFx
         /// <returns></returns>
         public FormulaValue GetValue(string name)
         {
-            var fi = Formulas[name];
-            return fi._value;
+            TryGetByName(name, out var fi);
+            var value = _symbolValues.Get(fi.Slot);
+            return value;
+        }
+
+        internal RecalcFormulaInfo GetByName(string name)
+        {
+            if (TryGetByName(name, out var fi))
+            {
+                return fi;
+            }
+
+            throw new InvalidOperationException($"{name} not found");
+        }
+
+        internal bool TryGetByName(string name, out RecalcFormulaInfo info)
+        {
+            if (_symbolTable.TryLookupSlot(name, out var slot))
+            {
+                if (slot.Owner != _symbolTable)
+                {
+                    throw _symbolTable.NewBadSlotException(slot);
+                }
+
+                info = Formulas[slot.SlotIndex];
+                return true;
+            }
+
+            info = null;
+            return false;
+        }
+
+        public bool TryGetVariableType(string name, out FormulaType type)
+        {
+            type = default;
+
+            if (_symbolTable.TryGetVariable(new DName(name), out var nameLookupInfo, out _))
+            {
+                type = FormulaType.Build(nameLookupInfo.Type);
+                return true;
+            }
+
+            return false;
         }
     } // end class RecalcEngine
 }

@@ -1,9 +1,10 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System.Text;
 using Microsoft.PowerFx.Core.Types;
 
-namespace Microsoft.PowerFx.Core.Public.Types
+namespace Microsoft.PowerFx.Types
 {
     /// <summary>
     /// Represents a Blank (similar to Null) value. BlankType is compatible with other types. 
@@ -15,9 +16,19 @@ namespace Microsoft.PowerFx.Core.Public.Types
         {
         }
 
-        public override void Visit(ITypeVistor vistor)
+        public override void Visit(ITypeVisitor vistor)
         {
             vistor.Visit(this);
+        }
+
+        public override string ToString()
+        {
+            return "Blank";
+        }
+
+        internal override void DefaultExpressionValue(StringBuilder sb)
+        {
+            sb.Append("Blank()");
         }
     }
 }

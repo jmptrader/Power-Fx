@@ -1,10 +1,10 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System.Globalization;
 using System.IO;
 using Microsoft.PowerFx.Core;
-using Microsoft.PowerFx.Core.Texl.Intellisense.SignatureHelp;
-using Microsoft.PowerFx.Core.Types.Enums;
+using Microsoft.PowerFx.Intellisense.SignatureHelp;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Xunit;
@@ -12,17 +12,21 @@ using Xunit;
 namespace Microsoft.PowerFx.Tests.IntellisenseTests
 {
     public class SignatureHelpTest : IntellisenseTestBase
-    {
-        private static readonly bool RegenerateSignatureHelp = false;
+    {       
+        private const bool RegenerateSignatureHelp = false;
 
         /// <summary>
         /// Resolves to the directory in the src folder that corresponds to the current directory, which may
         /// instead include the subpath bin/(Debug|Release).AnyCPU, depending on whether the assembly was
         /// built in debug or release mode.
         /// </summary>
-        private static readonly string _signatureHelpDirectory = Path.Join(Directory.GetCurrentDirectory(), "IntellisenseTests", "TestSignatures")
-            .Replace(Path.Join("bin", "Debug.AnyCPU"), "src")
-            .Replace(Path.Join("bin", "Release.AnyCPU"), "src");
+        private static readonly string _baseDirectory = Path.Join(Directory.GetCurrentDirectory(), "IntellisenseTests", "TestSignatures");
+
+        private static readonly string _signatureHelpDirectory = RegenerateSignatureHelp ?
+            _baseDirectory
+                .Replace(Path.Join("bin", "Debug", "netcoreapp3.1"), string.Empty)
+                .Replace(Path.Join("bin", "Release", "netcoreapp3.1"), string.Empty) :
+            _baseDirectory;
 
         /// <summary>
         /// Reads the current signature help test, located in the TestSignatures directory, deserializes and
@@ -32,7 +36,7 @@ namespace Microsoft.PowerFx.Tests.IntellisenseTests
         /// <param name="signatureHelp">
         /// Signature help value to test.
         /// </param>
-        private void CheckSignatureHelpTest(SignatureHelp signatureHelp, int helpId)
+        internal void CheckSignatureHelpTest(SignatureHelp signatureHelp, int helpId)
         {
             var directory = _signatureHelpDirectory;
             var signatureHelpPath = Path.Join(_signatureHelpDirectory, helpId + ".json");
@@ -44,14 +48,18 @@ namespace Microsoft.PowerFx.Tests.IntellisenseTests
 
                 if (RegenerateSignatureHelp)
                 {
+                    #pragma warning disable CS0162 // Unreachable code due to a local switch to regenerate baseline files
                     if (!JToken.DeepEquals(actualSignatureHelp, expectedSignatureHelp))
                     {
                         WriteSignatureHelp(signatureHelpPath, signatureHelp);
                     }
+                    #pragma warning restore CS0162
                 }
                 else
                 {
+                    #pragma warning disable CS0162 // Unreachable code due to a local switch to regenerate baseline files
                     Assert.True(JToken.DeepEquals(actualSignatureHelp, expectedSignatureHelp));
+                    #pragma warning restore CS0162
                 }
             }
             else
@@ -91,7 +99,7 @@ namespace Microsoft.PowerFx.Tests.IntellisenseTests
         [InlineData("If(true, If(true, 0, 1)|)", 8)]
         [InlineData("Filter|", 9)]
         [InlineData("|", 10)]
-        public void TestSignatureHelp(string expression, int helpId) => CheckSignatureHelpTest(Suggest(expression, new EnumStore()).SignatureHelp, helpId);
+        public void TestSignatureHelp(string expression, int helpId) => CheckSignatureHelpTest(Suggest(expression, SuggestTests.Default, CultureInfo.InvariantCulture).SignatureHelp, helpId);
 
         [Fact]
         public void TestRegenerateSignatureHelpIsOff() => Assert.False(RegenerateSignatureHelp);

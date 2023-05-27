@@ -2,22 +2,27 @@
 // Licensed under the MIT license.
 
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
+using System.Text;
+using Microsoft.PowerFx.Core.Entities;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Utils;
 
-namespace Microsoft.PowerFx.Core.Public.Types
+namespace Microsoft.PowerFx.Types
 {
     /// <summary>
     /// Base class for type of a Formula. 
     /// Formula Types are a class hiearchy.
     /// </summary>
     [DebuggerDisplay("{_type}")]
+    [ThreadSafeImmutable]
     public abstract class FormulaType
     {
-        // protected isn't enough to let derived classes access this.
-        internal readonly DType _type;
+#pragma warning disable SA1300 // Element should begin with upper-case letter
+        // Uses init to allow setting from derived constructors. Otherwise, is immutable.
+        internal DType _type { get; private protected init; }
+#pragma warning restore SA1300 // Element should begin with upper-case letter
 
         public static FormulaType Blank { get; } = new BlankType();
 
@@ -25,6 +30,8 @@ namespace Microsoft.PowerFx.Core.Public.Types
         public static FormulaType Boolean { get; } = new BooleanType();
 
         public static FormulaType Number { get; } = new NumberType();
+
+        public static FormulaType Decimal { get; } = new DecimalType();
 
         public static FormulaType String { get; } = new StringType();
 
@@ -43,7 +50,15 @@ namespace Microsoft.PowerFx.Core.Public.Types
         public static FormulaType Color { get; } = new ColorType();
 
         public static FormulaType Guid { get; } = new GuidType();
-        
+
+        public static FormulaType Unknown { get; } = new UnknownType();
+
+        public static FormulaType Deferred { get; } = new DeferredType();
+
+        public static FormulaType BindingError { get; } = new BindingErrorType();
+
+        public static FormulaType Void { get; } = new Void();
+
         /// <summary>
         /// Internal use only to represent an arbitrary (un-backed) option set value.
         /// Should be removed if possible.
@@ -56,17 +71,81 @@ namespace Microsoft.PowerFx.Core.Public.Types
             _type = type;
         }
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="FormulaType"/> class.
+        /// Used for subclasses that must set DType themselves.
+        /// </summary>
+        private protected FormulaType()
+        {            
+        }
+
+        // Entites may be recursive and their Dytype is tagged with additional schema metadata. 
+        // Expand that metadata into a proper Dtype. 
+        private static DType GetExpandedEntityType(DType expandEntityType, string relatedEntityPath)
+        {
+            Contracts.AssertValid(expandEntityType);
+            Contracts.Assert(expandEntityType.HasExpandInfo);
+            Contracts.AssertValue(relatedEntityPath);
+
+            var expandEntityInfo = expandEntityType.ExpandInfo;
+
+            if (expandEntityInfo.ParentDataSource is not IExternalTabularDataSource dsInfo)
+            {
+                return expandEntityType;
+            }                        
+
+            if (!expandEntityType.TryGetEntityDelegationMetadata(out var metadata))
+            {
+                // We need more metadata to bind this fully
+                return DType.Error;
+            }
+
+            var type = expandEntityType.ExpandEntityType(metadata.Schema, metadata.Schema.AssociatedDataSources);
+            Contracts.Assert(type.HasExpandInfo);
+
+            // Update the datasource and relatedEntity path.
+            type.ExpandInfo.UpdateEntityInfo(expandEntityInfo.ParentDataSource, relatedEntityPath);
+
+            return type;
+        }
+
+        internal static FormulaType[] GetValidUDFPrimitiveTypes()
+        {
+            FormulaType[] validTypes = { Blank, Boolean, Number, Decimal, String, Time, Date, DateTime, DateTimeNoTimeZone, Hyperlink, Color, Guid };
+            return validTypes;
+        }
+
+        internal static FormulaType GetFromStringOrNull(string formula)
+        {
+            foreach (FormulaType formulaType in GetValidUDFPrimitiveTypes())
+            {
+                if (string.Equals(formulaType.ToString(), formula, StringComparison.Ordinal))
+                {
+                    return formulaType;
+                }
+            }
+
+            return null;
+        }
+
         // Get the correct derived type
         internal static FormulaType Build(DType type)
         {
+            if (type.IsExpandEntity)
+            {
+                var expandedType = GetExpandedEntityType(type, string.Empty);
+                return Build(expandedType);
+            }
+
             switch (type.Kind)
             {
                 case DKind.ObjNull: return Blank;
-
-                case DKind.Record: return new RecordType(type);
-                case DKind.Table: return new TableType(type);
-
+                case DKind.Record:
+                    return new KnownRecordType(type);
+                case DKind.Table:
+                    return new TableType(type);
                 case DKind.Number: return Number;
+                case DKind.Decimal: return Decimal;
                 case DKind.String: return String;
                 case DKind.Boolean: return Boolean;
                 case DKind.Currency: return Number; // TODO: validate
@@ -80,18 +159,47 @@ namespace Microsoft.PowerFx.Core.Public.Types
                 case DKind.DateTimeNoTimeZone: return DateTimeNoTimeZone;
 
                 case DKind.OptionSetValue:
-                    var isBoolean = type.OptionSetInfo?.IsBooleanValued;
-                    return isBoolean.HasValue && isBoolean.Value ? Boolean : OptionSetValue;
+                    
+                    // In all non-test cases, this option set info must be present
+                    // For some existing tests, it isn't available. Once that's resolved, this should be cleaned up
+                    return type.OptionSetInfo != null ? new OptionSetValueType(type.OptionSetInfo) : OptionSetValue;
 
                 // This isn't quite right, but once we're in the IR, an option set acts more like a record with optionsetvalue fields. 
                 case DKind.OptionSet:
-                    return new RecordType(DType.CreateRecord(type.GetAllNames(DPath.Root)));
+                    return new KnownRecordType(DType.CreateRecord(type.GetAllNames(DPath.Root)));
 
                 case DKind.UntypedObject:
                     return UntypedObject;
 
+                case DKind.Unknown:
+                    return Unknown;
+
+                case DKind.Error:
+                    return BindingError;
+                    
+                case DKind.LazyRecord:
+                    if (type.LazyTypeProvider.BackingFormulaType is RecordType record)
+                    {
+                        // For Build calls, if the type is actually defined by a derived FormulaType, we return the derived instance.
+                        return record;
+                    }
+
+                    return new KnownRecordType(type);
+                    
+                case DKind.LazyTable:
+                    if (type.LazyTypeProvider.BackingFormulaType is TableType table)
+                    {
+                        // For Build calls, if the type is actually defined by a derived FormulaType, we return the derived instance.
+                        return table;
+                    }
+
+                    return new TableType(type);
+                case DKind.Deferred:
+                    return Deferred;
+                case DKind.Void: 
+                    return Void;
                 default:
-                    throw new NotImplementedException($"Not implemented type: {type}");
+                    return new UnsupportedType(type);
             }
         }
 
@@ -129,6 +237,20 @@ namespace Microsoft.PowerFx.Core.Public.Types
 
         #endregion // Equality
 
-        public abstract void Visit(ITypeVistor vistor);
+        public abstract void Visit(ITypeVisitor vistor);
+
+        internal virtual void DefaultExpressionValue(StringBuilder sb)
+        {
+            throw new NotSupportedException($"{GetType().FullName} doesn't implement DefaultExpressionValue.");
+        }
+
+        internal string DefaultExpressionValue()
+        {
+            var sb = new StringBuilder();
+
+            DefaultExpressionValue(sb);
+
+            return sb.ToString();
+        }
     }
 }

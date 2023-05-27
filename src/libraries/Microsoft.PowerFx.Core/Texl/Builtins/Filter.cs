@@ -10,9 +10,13 @@ using Microsoft.PowerFx.Core.Functions;
 using Microsoft.PowerFx.Core.Functions.Delegation;
 using Microsoft.PowerFx.Core.Functions.Delegation.DelegationMetadata;
 using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
+using static Microsoft.PowerFx.Syntax.PrettyPrintVisitor;
+
+#pragma warning disable SA1402 // File may only contain a single type
+#pragma warning disable SA1649 // File name should match first type name
 
 namespace Microsoft.PowerFx.Core.Texl.Builtins
 {
@@ -20,15 +24,11 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
     // Corresponding DAX function: Filter
     internal sealed class FilterFunction : FilterFunctionBase
     {
-        public override bool RequiresErrorContext => true;
-
         public FilterFunction()
             : base("Filter", TexlStrings.AboutFilter, FunctionCategories.Table, DType.EmptyTable, -2, 2, int.MaxValue, DType.EmptyTable)
         {
             ScopeInfo = new FunctionScopeInfo(this, acceptsLiteralPredicates: false);
         }
-
-        public override bool SupportsParamCoercion => true;
 
         public override IEnumerable<TexlStrings.StringGetter[]> GetSignatures()
         {
@@ -48,16 +48,28 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             return base.GetSignatures(arity);
         }
 
-        public override bool CheckInvocation(TexlBinding binding, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
+        public override bool CheckTypes(CheckTypesContext context, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
         {
             Contracts.AssertValue(args);
             Contracts.AssertValue(argTypes);
             Contracts.Assert(args.Length == argTypes.Length);
             Contracts.AssertValue(errors);
             nodeToCoercedTypeMap = null;
-            var viewCount = 0;
 
-            var fArgsValid = CheckInvocation(args, argTypes, errors, out returnType, out nodeToCoercedTypeMap);
+            var fArgsValid = base.CheckTypes(context, args, argTypes, errors, out returnType, out nodeToCoercedTypeMap);
+
+            // The first Texl function arg determines the cursor type, the scope type for the lambda params, and the return type.
+            fArgsValid &= ScopeInfo.CheckInput(context.Features, args[0], argTypes[0], errors, out var typeScope);
+
+            Contracts.Assert(typeScope.IsRecord);
+            returnType = typeScope.ToTable();
+
+            return fArgsValid;
+        }
+
+        public override void CheckSemantics(TexlBinding binding, TexlNode[] args, DType[] argTypes, IErrorContainer errors)
+        {
+            var viewCount = 0;
 
             var dataSourceVisitor = new ViewFilterDataSourceVisitor(binding);
 
@@ -70,7 +82,6 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
                     {
                         // Only one view expected
                         errors.EnsureError(DocumentErrorSeverity.Severe, args[i], TexlStrings.ErrOnlyOneViewExpected);
-                        fArgsValid = false;
                         continue;
                     }
 
@@ -82,7 +93,6 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
                     {
                         // Only one view expected
                         errors.EnsureError(DocumentErrorSeverity.Severe, args[i], TexlStrings.ErrOnlyOneViewExpected);
-                        fArgsValid = false;
                         continue;
                     }
 
@@ -93,36 +103,25 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
                         if (viewInfo.RelatedEntityName != dataSourceInfo.Name)
                         {
                             errors.EnsureError(DocumentErrorSeverity.Severe, args[i], TexlStrings.ErrViewFromCurrentTableExpected, dataSourceInfo.Name);
-                            fArgsValid = false;
                         }
                     }
                     else
                     {
                         errors.EnsureError(DocumentErrorSeverity.Severe, args[i], TexlStrings.ErrBooleanExpected);
-                        fArgsValid = false;
                     }
 
                     continue;
                 }
-                else if (DType.Boolean.Accepts(argTypes[i]))
+                else if (DType.Boolean.Accepts(argTypes[i], exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: binding.Features.PowerFxV1CompatibilityRules))
                 {
                     continue;
                 }
-                else if (!argTypes[i].CoercesTo(DType.Boolean))
+                else if (!argTypes[i].CoercesTo(DType.Boolean, aggregateCoercion: true, isTopLevelCoercion: false, usePowerFxV1CompatibilityRules: binding.Features.PowerFxV1CompatibilityRules))
                 {
                     errors.EnsureError(DocumentErrorSeverity.Severe, args[i], TexlStrings.ErrBooleanExpected);
-                    fArgsValid = false;
                     continue;
                 }
             }
-
-            // The first Texl function arg determines the cursor type, the scope type for the lambda params, and the return type.
-            fArgsValid &= ScopeInfo.CheckInput(args[0], argTypes[0], errors, out var typeScope);
-
-            Contracts.Assert(typeScope.IsRecord);
-            returnType = typeScope.ToTable();
-
-            return fArgsValid;
         }
 
         // Verifies if given callnode can be server delegatable or not.
@@ -182,3 +181,6 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
         }
     }
 }
+
+#pragma warning restore SA1402 // File may only contain a single type
+#pragma warning restore SA1649 // File name should match first type name

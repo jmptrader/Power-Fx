@@ -1,9 +1,7 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-using Microsoft.PowerFx.Core.Types.Enums;
-
-namespace Microsoft.PowerFx.Core.Texl.Intellisense
+namespace Microsoft.PowerFx.Intellisense
 {
     internal static class IntellisenseProvider
     {
@@ -25,9 +23,9 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
             new Intellisense.RecordNodeSuggestionHandler(),
         };
 
-        internal static IIntellisense GetIntellisense(EnumStore enumStore)
+        internal static IIntellisense GetIntellisense(PowerFxConfig config)
         {
-            return new Intellisense(enumStore, SuggestionHandlers);
+            return new Intellisense(config, config.EnumStore, SuggestionHandlers);
         }
     }
 }

@@ -2,13 +2,13 @@
 // Licensed under the MIT license.
 
 using Microsoft.PowerFx.Core.Binding;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
 namespace Microsoft.PowerFx.Core.Functions.FunctionArgValidators
 {
+    [ThreadSafeImmutable]
     internal sealed class EntityArgNodeValidator : IArgValidator<IExpandInfo>
     {
         public bool TryGetValidValue(TexlNode argNode, TexlBinding binding, out IExpandInfo entityInfo)

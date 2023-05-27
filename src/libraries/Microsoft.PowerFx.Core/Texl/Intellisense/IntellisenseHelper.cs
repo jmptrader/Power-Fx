@@ -4,17 +4,17 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using Microsoft.PowerFx.Core.Binding;
 using Microsoft.PowerFx.Core.Binding.BindInfo;
 using Microsoft.PowerFx.Core.Functions;
-using Microsoft.PowerFx.Core.Lexer;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Types.Enums;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
+using Microsoft.PowerFx.Types;
 
-namespace Microsoft.PowerFx.Core.Texl.Intellisense
+namespace Microsoft.PowerFx.Intellisense
 {
     internal static class IntellisenseHelper
     {
@@ -145,7 +145,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
                     var dispText = curList[index].DisplayText;
 
                     // If we are already using the global syntax, we should not add it again.
-                    if (dispText.Text.StartsWith(TexlLexer.PunctuatorBracketOpen + TexlLexer.PunctuatorAt))
+                    if (dispText.Text.StartsWith(TexlLexer.PunctuatorBracketOpen + TexlLexer.PunctuatorAt, StringComparison.Ordinal))
                     {
                         continue;
                     }
@@ -218,7 +218,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
             intellisenseData.Suggestions.Clear();
             intellisenseData.SubstringSuggestions.Clear();
             intellisenseData.SetMatchArea(intellisenseData.ReplacementStartIndex, intellisenseData.ReplacementStartIndex);
-            AddSuggestionsForMatches(intellisenseData, TexlLexer.LocalizedInstance.GetOperatorKeywords(type), SuggestionKind.BinaryOperator, SuggestionIconKind.Other, requiresSuggestionEscaping: false);
+            AddSuggestionsForMatches(intellisenseData, TexlLexer.GetOperatorKeywords(type), SuggestionKind.BinaryOperator, SuggestionIconKind.Other, requiresSuggestionEscaping: false);
         }
 
         /// <summary>
@@ -233,22 +233,18 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
             Contracts.AssertValue(enumInfo);
             Contracts.AssertValue(prefix);
 
-            var anyCollisionExists = false;
+            var fullyQualifyAll = false;
             var locNameTypePairs = new List<Tuple<string, DType>>();
 
-            // We do not need to get the localized names since GetNames will only return invariant.
-            // Instead, we use the invariant names later with the enumInfo to retrieve the localized name.
             foreach (var typedName in enumInfo.EnumType.GetNames(DPath.Root))
             {
-                enumInfo.TryGetLocValueName(typedName.Name.Value, out var locName).Verify();
-                var escapedLocName = TexlLexer.EscapeName(locName);
-
-                var collisionExists = intellisenseData.DoesNameCollide(locName);
-                if (collisionExists)
+                var escapedLocName = TexlLexer.EscapeName(typedName.Name.Value);
+                var shouldFullyQualify = !intellisenseData.SuggestUnqualifiedEnums || intellisenseData.DoesUnqualifiedEnumNameCollide(typedName.Name.Value);
+                if (shouldFullyQualify)
                 {
                     var candidate = prefix + escapedLocName;
                     var canAddSuggestion = _addSuggestionDryRunHelper.AddSuggestion(intellisenseData, candidate, SuggestionKind.Global, SuggestionIconKind.Other, typedName.Type, false);
-                    anyCollisionExists = anyCollisionExists || canAddSuggestion;
+                    fullyQualifyAll = fullyQualifyAll || canAddSuggestion;
                 }
 
                 locNameTypePairs.Add(new Tuple<string, DType>(escapedLocName, typedName.Type));
@@ -256,7 +252,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
 
             foreach (var locNameTypePair in locNameTypePairs)
             {
-                var suggestion = anyCollisionExists || !intellisenseData.SuggestUnqualifiedEnums ? prefix + locNameTypePair.Item1 : locNameTypePair.Item1;
+                var suggestion = fullyQualifyAll || !intellisenseData.SuggestUnqualifiedEnums ? prefix + locNameTypePair.Item1 : locNameTypePair.Item1;
                 AddSuggestion(intellisenseData, suggestion, SuggestionKind.Global, SuggestionIconKind.Other, locNameTypePair.Item2, false);
             }
         }
@@ -266,7 +262,8 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
             Contracts.AssertValid(type);
             Contracts.AssertValue(data);
 
-            foreach (var field in type.GetNames(DPath.Root))
+            foreach (var field in type.GetRootFieldNames()
+                .Select(field => (Type: type.GetType(field), Name: field)))
             {
                 var usedName = field.Name;
                 if (DType.TryGetDisplayNameForColumn(type, usedName, out var maybeDisplayName))
@@ -306,7 +303,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
             Contracts.Assert(type.IsValid);
             Contracts.Assert(prefix.Length == 0 || (TexlLexer.PunctuatorBang + TexlLexer.PunctuatorDot).IndexOf(prefix[prefix.Length - 1]) >= 0);
 
-            foreach (var tName in type.GetAllNames(DPath.Root))
+            foreach (var tName in type.GetRootFieldNames().Select(name => (Type: type.GetType(name), Name: name)))
             {
                 if (!intellisenseData.TryAddCustomColumnTypeSuggestions(tName.Type))
                 {
@@ -330,35 +327,103 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
             Contracts.AssertValue(callNode);
             Contracts.Assert(argPosition >= 0);
 
-            var info = intellisenseData.Binding.GetInfo(callNode);
+            CallInfo info = intellisenseData.Binding.GetInfo(callNode);
             Contracts.AssertValue(info);
-            var type = info.CursorType;
+            DType type = info.CursorType;
 
             // Suggestions are added for the error nodes in the next step.
-            if (info.Function != null &&
-                argPosition <= info.Function.MaxArity &&
-                info.Function.IsLambdaParam(argPosition) &&
-                !info.Function.HasSuggestionsForParam(argPosition) &&
-                type.IsValid)
+            if (info.Function != null && argPosition <= info.Function.MaxArity)
             {
-                if (info.Function.IsLambdaParam(argPosition) && type.ContainsDataEntityType(DPath.Root))
+                if (info.Function.IsLambdaParam(argPosition) && !info.Function.HasSuggestionsForParam(argPosition) && type.IsValid)
                 {
-                    var error = false;
-                    type = type.DropAllOfTableRelationships(ref error, DPath.Root);
-                    if (error)
+                    if (type.ContainsDataEntityType(DPath.Root))
                     {
-                        return;
+                        var error = false;
+                        type = type.DropAllOfTableRelationships(ref error, DPath.Root);
+                        if (error)
+                        {
+                            return;
+                        }
+                    }
+
+                    if (info.ScopeIdentifier != default)
+                    {
+                        AddSuggestion(intellisenseData, info.ScopeIdentifier, SuggestionKind.Global, SuggestionIconKind.Other, type, requiresSuggestionEscaping: false);
+                    }
+
+                    if (!info.RequiresScopeIdentifier)
+                    {
+                        AddTopLevelSuggestions(intellisenseData, type);
                     }
                 }
 
-                if (info.ScopeIdentifier != default)
+                FormulaValue[] parameters = callNode.Args.Children.Where(texlNode => texlNode.Kind != NodeKind.Error).Select(texlNode => texlNode switch
                 {
-                    AddSuggestion(intellisenseData, info.ScopeIdentifier, SuggestionKind.Global, SuggestionIconKind.Other, type, requiresSuggestionEscaping: false);
-                }
+                    StrLitNode strNode => FormulaValue.New(strNode.Value),
+                    NumLitNode numNode => FormulaValue.New(numNode.ActualNumValue),
+                    _ => null as FormulaValue
+                }).ToArray();
 
-                if (!info.RequiresScopeIdentifier)
-                {
-                    AddTopLevelSuggestions(intellisenseData, type);
+                // If connector function has some suggestions, let's add them here
+                ConnectorSuggestions suggestions = info.Function.GetConnectorSuggestionsAsync(parameters, argPosition, CancellationToken.None).ConfigureAwait(false).GetAwaiter().GetResult();
+
+                if (suggestions != null && suggestions.Error == null && suggestions.Suggestions != null)
+                {                    
+                    foreach (ConnectorSuggestion suggestion in suggestions.Suggestions)
+                    {
+                        // for all parameters, except last one we have direct parameters / not in a record
+                        if (argPosition < info.Function.MaxArity - 1)
+                        {
+                            string suggestionStr = suggestion.Suggestion.ToExpression();
+
+                            if (!string.IsNullOrEmpty(suggestionStr))
+                            {
+                                AddSuggestion(intellisenseData, suggestionStr, SuggestionKind.Global, SuggestionIconKind.Other, suggestion.Suggestion.Type._type, false);
+                            }
+                        }
+                        else
+                        {
+                            TexlNode currentArg = callNode.Args.Children[argPosition];
+
+                            if (currentArg.Kind != NodeKind.Record)
+                            {
+                                AddSuggestion(intellisenseData, $@"{{ {suggestion.DisplayName}:", SuggestionKind.Global, SuggestionIconKind.Other, DType.String, false);
+                            }
+                            else
+                            {
+                                List<string> possibleFields = suggestions.Suggestions.Select(s => s.DisplayName).ToList();
+                                string[] existingFieldsInCall = currentArg.AsRecord().Ids.Select(id => id.Token._value).ToArray();
+
+                                // remove all existing valid ids
+                                for (int i = 0; i < existingFieldsInCall.Length - 1; i++)
+                                {
+                                    string idInCall = existingFieldsInCall[i];
+                                    string possibleField = possibleFields.FirstOrDefault(pf => pf.Equals(idInCall, StringComparison.OrdinalIgnoreCase));
+
+                                    if (!string.IsNullOrWhiteSpace(possibleField))
+                                    {
+                                        possibleFields.Remove(possibleField);
+                                    }
+                                }
+
+                                // filter on last element name
+                                if (existingFieldsInCall.Length > 0)
+                                {
+                                    string lastIdInCall = existingFieldsInCall[existingFieldsInCall.Length - 1];
+
+                                    if (!string.IsNullOrWhiteSpace(lastIdInCall))
+                                    {
+                                        possibleFields = possibleFields.Where(f => f.StartsWith(lastIdInCall, StringComparison.OrdinalIgnoreCase)).ToList();
+                                    }
+                                }
+
+                                foreach (string possibleField in possibleFields)
+                                {
+                                    AddSuggestion(intellisenseData, possibleField, SuggestionKind.Global, SuggestionIconKind.Other, DType.String, false);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -420,7 +485,8 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
         {
             Contracts.AssertValid(scopeType);
 
-            foreach (var name in scopeType.GetNames(DPath.Root))
+            foreach (var name in scopeType.GetRootFieldNames()
+                .Select(field => (Type: scopeType.GetType(field), Name: field)))
             {
                 yield return new KeyValuePair<string, DType>("\"" + CharacterUtils.ExcelEscapeString(name.Name.Value) + "\"", name.Type);
             }
@@ -438,9 +504,10 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
             }
 
             var suggestions = new List<KeyValuePair<string, DType>>();
-            foreach (var tName in typeToSuggestFrom.GetNames(DPath.Root))
+            foreach (var tName in typeToSuggestFrom.GetRootFieldNames()
+                .Select(field => (Type: typeToSuggestFrom.GetType(field), Name: field)))
             {
-                if (suggestionType.Accepts(tName.Type))
+                if (suggestionType.Accepts(tName.Type, exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: true))
                 {
                     var usedName = tName.Name.Value;
                     if (DType.TryGetDisplayNameForColumn(typeToSuggestFrom, usedName, out var maybeDisplayName))
@@ -529,8 +596,8 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
         /// <summary>
         /// Adds suggestions for a given node.
         /// </summary>
+        /// <param name="intellisenseData"></param>
         /// <param name="node">Node for which suggestions are needed.</param>
-        /// <param name="hasSpecificSuggestions">Flag to indicate if inner most function has any specific suggestions.</param>
         /// <param name="currentNode">Current node in the traversal.</param>
         public static bool AddTopLevelSuggestionsForGivenNode(IntellisenseData.IntellisenseData intellisenseData, TexlNode node, TexlNode currentNode)
         {
@@ -626,7 +693,9 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
             // TASK: 76039: Intellisense: Update intellisense to filter suggestions based on the expected type of the text being typed in UI
             Contracts.AssertValue(intellisenseData);
 
-            foreach (var function in intellisenseData.Binding.NameResolver.Functions)
+            // $$$ Needs optimization
+#pragma warning disable CS0618 // Type or member is obsolete
+            foreach (var function in intellisenseData.Binding.NameResolver.Functions.Functions)
             {
                 var qualifiedName = function.QualifiedName;
                 var highlightStart = qualifiedName.IndexOf(intellisenseData.MatchingStr, StringComparison.OrdinalIgnoreCase);
@@ -643,6 +712,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
                     }
                 }
             }
+#pragma warning restore CS0618 // Type or member is obsolete
         }
 
         /// <summary>
@@ -706,9 +776,8 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
 
             intellisenseData.AddCustomSuggestionsForGlobals();
 
-            // Suggest function namespaces
-            var namespaces = intellisenseData.Binding.NameResolver.Functions.Select(func => func.Namespace).Distinct();
-            foreach (var funcNamespace in namespaces)
+            // Suggest function namespaces                                        
+            foreach (var funcNamespace in intellisenseData.Binding.NameResolver.Functions.Namespaces)
             {
                 if (funcNamespace == DPath.Root)
                 {
@@ -717,6 +786,24 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
 
                 AddSuggestion(intellisenseData, funcNamespace.Name, SuggestionKind.Global, SuggestionIconKind.Other, DType.Unknown, requiresSuggestionEscaping: true);
             }
+
+            if (intellisenseData.Binding.NameResolver is IGlobalSymbolNameResolver nr2)
+            {
+                var globalSymbols = nr2.GlobalSymbols;
+                if (globalSymbols != null)
+                {
+                    foreach (var symbol in globalSymbols)
+                    {
+                        var suggestableName = symbol.Key;
+                        if (symbol.Value.DisplayName.IsValid)
+                        {
+                            suggestableName = symbol.Value.DisplayName.Value;
+                        }
+
+                        AddSuggestion(intellisenseData, suggestableName, SuggestionKind.Global, SuggestionIconKind.Other, symbol.Value.Type, true);
+                    }
+                }
+            }
         }
 
         public static void AddSuggestionsForUnaryOperatorKeyWords(IntellisenseData.IntellisenseData intellisenseData)
@@ -724,7 +811,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
             Contracts.AssertValue(intellisenseData);
 
             // TASK: 76039: Intellisense: Update intellisense to filter suggestions based on the expected type of the text being typed in UI
-            AddSuggestionsForMatches(intellisenseData, TexlLexer.LocalizedInstance.GetUnaryOperatorKeywords(), SuggestionKind.KeyWord, SuggestionIconKind.Other, requiresSuggestionEscaping: false);
+            AddSuggestionsForMatches(intellisenseData, TexlLexer.GetUnaryOperatorKeywords(), SuggestionKind.KeyWord, SuggestionIconKind.Other, requiresSuggestionEscaping: false);
         }
 
         public static void AddSuggestionsForEnums(IntellisenseData.IntellisenseData intellisenseData)
@@ -739,47 +826,12 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
             foreach (var enumInfo in intellisenseData.EnumSymbols)
             {
                 var enumType = enumInfo.EnumType;
-                var enumName = enumInfo.Name;
+                var enumName = TexlLexer.EscapeName(enumInfo.EntityName.Value);
 
                 // TASK: 76039: Intellisense: Update intellisense to filter suggestions based on the expected type of the text being typed in UI
-                AddSuggestion(intellisenseData, enumName, SuggestionKind.Enum, SuggestionIconKind.Other, enumType, requiresSuggestionEscaping: true);
+                AddSuggestion(intellisenseData, enumName, SuggestionKind.Enum, SuggestionIconKind.Other, enumType, requiresSuggestionEscaping: false);
 
                 AddSuggestionsForEnum(intellisenseData, enumInfo, prefix: enumName + TexlLexer.PunctuatorDot);
-            }
-
-            if (suggestions.Count + substringSuggestions.Count == countSuggBefore + countSubSuggBefore + 1 && intellisenseData.SuggestUnqualifiedEnums)
-            {
-                var enumSuggestion = suggestions.Count > countSuggBefore ? suggestions[countSuggBefore].Text : substringSuggestions[countSubSuggBefore].Text;
-                var dotIndex = enumSuggestion.LastIndexOf(TexlLexer.PunctuatorDot);
-
-                // Assert '.' is not present or not at the beginning or the end of the EnumSuggestion
-                Contracts.Assert(dotIndex == -1 || (dotIndex > 0 && dotIndex < enumSuggestion.Length - 1));
-                var unqualifiedEnum = enumSuggestion.Substring(dotIndex + 1);
-
-                // If the Enum we are about suggest unqualified (i.e. just 'Blue' instead of Color!Blue)
-                // has a name collision with some Item already in the suggestionlist we should not continue
-                // and suggest it.
-                if (suggestions.Any(x => x.Text == unqualifiedEnum) || substringSuggestions.Any(x => x.Text == unqualifiedEnum))
-                {
-                    return;
-                }
-
-                DType enumType;
-                if (suggestions.Count > countSuggBefore)
-                {
-                    enumType = suggestions[countSuggBefore].Type;
-                    suggestions.RemoveAt(suggestions.Count - 1);
-                }
-                else
-                {
-                    Contracts.Assert(substringSuggestions.Count > countSubSuggBefore);
-                    enumType = substringSuggestions[countSubSuggBefore].Type;
-                    substringSuggestions.RemoveAt(substringSuggestions.Count - 1);
-                }
-
-                // Add the unqualified Enum.
-                // Note: The suggestion has already been escaped when it was previously added
-                AddSuggestion(intellisenseData, unqualifiedEnum, SuggestionKind.Enum, SuggestionIconKind.Other, enumType, requiresSuggestionEscaping: false);
             }
         }
 

@@ -5,10 +5,9 @@ using Microsoft.PowerFx.Core.App;
 using Microsoft.PowerFx.Core.Binding.BindInfo;
 using Microsoft.PowerFx.Core.Entities;
 using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
 namespace Microsoft.PowerFx.Core.Binding
 {
@@ -18,8 +17,8 @@ namespace Microsoft.PowerFx.Core.Binding
         {
             private readonly TexlBinding _txb;
 
-            public BinderNodesMetadataArgTypeVisitor(TexlBinding binding, INameResolver resolver, DType topScope, bool useThisRecordForRuleScope)
-                : base(binding, resolver, topScope, useThisRecordForRuleScope)
+            public BinderNodesMetadataArgTypeVisitor(TexlBinding binding, INameResolver resolver, DType topScope, bool useThisRecordForRuleScope, Features features)
+                : base(binding, resolver, topScope, useThisRecordForRuleScope, features)
             {
                 Contracts.AssertValue(binding);
 

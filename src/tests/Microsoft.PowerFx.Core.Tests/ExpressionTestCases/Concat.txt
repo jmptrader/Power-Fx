@@ -1,6 +1,9 @@
 ﻿>> Concat(ForAll(["a","b","c"], With({x:Value}, x)), Value)
 "abc"
 
+>> Concat(ForAll(["a","b","c"], With({x:Value}, x)), Value, "-")
+"a-b-c"
+
 // On name collision, closest scope wins. 
 >> Concat(ForAll(["a","b","c"] As x, With({x:"hide"}, x)), Value)
 "hidehidehide"
@@ -12,14 +15,21 @@
 >> Concat(["A", "B", "C"], ThisRecord.Value)
 "ABC"
 
+// Explicit 'ThisRecord', with separator
+>> Concat(["A", "B", "C"], ThisRecord.Value, ", ")
+"A, B, C"
+
 // Using 'As'
 >> Concat(["A", "B", "C"] As X, X.Value)
 "ABC"
 
+// Using 'As' and separators
+>> Concat(["A", "B", "C"] As X, X.Value, ".")
+"A.B.C"
+
 // Implicit 'ThisRecord'
 >> Concat(["A", "B", "C"], Value)
 "ABC"
-
 
 // Good example of nested ForAll
 // https://powerapps.microsoft.com/en-us/blog/formulas-thisrecord-as-and-sequence/
@@ -27,6 +37,8 @@
 >> Concat(ForAll(["A","B"] As X,Concat(ForAll(["C","D"] As Y,X.Value&Y.Value),Value)),Value)
 "ACADBCBD"
 
+>> Concat(ForAll(["A","B"] As X,Concat(ForAll(["C","D"] As Y, X.Value & Y.Value),Value, "-")),Value, ", ")
+"AC-AD, BC-BD"
 
 // X dst,src = 2,3
 // Y         = 3,3
@@ -63,8 +75,83 @@
     Value)
 "CDCD"
 
+// Concat with empty table
 >> Concat(ForAll(FirstN([60, 61, 62, 63, 64], Blank()), Char(Value)), Value)
+""
+
+>> Concat(Filter([1,2,3], Value > 10), Text(Value))
+""
+
+>> Concat(Filter([1,2,3], Value > 10), Text(Value), ",")
+""
+
+// Concat with blank table
+>> Concat(ForAll(If(1<0,[60, 61, 62]), Char(Value)), Value)
 Blank()
 
 >> Concat(ForAll(Sort([60, 61, 0, 63, 64], 1/Value), Char(Value)), Value)
-#Error
+Error({Kind:ErrorKind.Div0})
+
+>> Concat(Table({a: "one"}, {a: "two"}, {a: "three"}), a, ", ")
+"one, two, three"
+
+>> Concat(Table({a: "one"}, {a: "two"}, {a: "three"}), a, Left(", ", -1))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> With({a:"."}, Concat(Sequence(5, 65), Char(Value), $"-{a}-"))
+"A-.-B-.-C-.-D-.-E"
+
+>> Concat(["one", "two", "three"], Value, Len(Value)) // Separator cannot access record
+Errors: Error 43-48: Name isn't valid. 'Value' isn't recognized.
+
+// Blank results in the lambda
+>> Concat([2, 1, 0, -1, -2], If(Value <> 0, Text(1 / Value)), ",")
+"0.5,1,,-1,-0.5"
+
+// Errors in the lambda
+>> Concat([2, 1, 0, -1, -2], Text(1 / Value), ",")
+Error({Kind:ErrorKind.Div0})
+
+// Coercions on lambda
+>> Concat([1, 2, 3], Value, ",")
+"1,2,3"
+
+>> Concat([1, 2, 3], Mod(Value, 2) = 0, ",")
+"false,true,false"
+
+>> Concat([1, 2, 3], Date(2020 + Value,1,1), ",")
+"1/1/2021,1/1/2022,1/1/2023"
+
+>> Concat([1, 2, 3], Time(10 + Value, Value * 10, 0), ",")
+"11:10 AM,12:20 PM,1:30 PM"
+
+// Coercion on separator
+>> Concat([1, 2, 3], "a" & Value, 0)
+"a10a20a3"
+
+// Coercion on separator
+>> Concat([1, 2, 3], $"-a{Value}-", false)
+"-a1-false-a2-false-a3-"
+
+// Concat handling errors
+>> Concat([1, 2, Sqrt(-1), 3, 4], IfError(Value, -FirstError.Kind), ",")
+"1,2,-24,3,4"
+
+>> Concat(Table({a:1},{a:2},If(1/0<2,{a:3}),{a:4},{a:5}), IfError(a, -FirstError.Kind), ",")
+"1,2,-13,4,5"
+
+>> Concat(Table({a:1},{a:1/0},{a:3},If(1/0<2,{a:4}),{a:5}), If(IsError(ThisRecord), -100, IfError(a, -FirstError.Kind)), ",")
+"1,-13,3,-100,5"
+
+// Concat handling blanks
+>> Concat([1, Blank(), 3], Coalesce(Value,0), ",")
+"1,0,3"
+
+>> Concat(Table({a:1},Blank(),{a:3}), Coalesce(a,0), ",")
+"1,0,3"
+
+>> Concat(Table({a:1},{a:Blank()},{a:3},If(1<0,{a:4}),{a:5}), If(IsBlank(ThisRecord), -100, Coalesce(a, 0)), ",")
+"1,0,3,-100,5"
+
+>> Concat([1,3,Blank(),5], If(IsBlank(ThisRecord), -100, Coalesce(Value, 0)), ",")
+"1,3,0,5"

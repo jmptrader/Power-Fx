@@ -3,37 +3,56 @@
 
 using System;
 using System.Collections.Generic;
-using Microsoft.PowerFx.Core.Lexer;
-using Microsoft.PowerFx.Core.Lexer.Tokens;
 using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Syntax.SourceInformation;
-using Microsoft.PowerFx.Core.Syntax.Visitors;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
+using Microsoft.PowerFx.Syntax.SourceInformation;
 
-namespace Microsoft.PowerFx.Core.Syntax.Nodes
+namespace Microsoft.PowerFx.Syntax
 {
-    internal sealed class DottedNameNode : NameNode
+    /// <summary>
+    /// Dotted identifier name parse node. Example:
+    /// 
+    /// <code>Left.Right</code>
+    /// </summary>
+    public sealed class DottedNameNode : NameNode
     {
-        public readonly TexlNode Left;
-        public readonly Identifier Right;
+        /// <summary>
+        /// The left node of the dotted name.
+        /// </summary>
+        public TexlNode Left { get; }
+
+        /// <summary>
+        /// The right identifier of the dotted name.
+        /// </summary>
+        public Identifier Right { get; }
 
         // Can be null
-        public readonly TexlNode RightNode;
-        public readonly bool HasOnlyIdentifiers;
-        public readonly bool HasPossibleNamespaceQualifier;
+        internal readonly TexlNode RightNode;
 
+        internal readonly bool HasOnlyIdentifiers;
+
+        internal readonly bool HasPossibleNamespaceQualifier;
+
+        /// <inheritdoc />
         public override NodeKind Kind => NodeKind.DottedName;
 
-        // True if the name uses dots, e.g. A.B.C
-        public bool UsesDot => Token.Kind == TokKind.Dot;
+        /// <summary>
+        /// True if the name uses dots, e.g. A.B.C.
+        /// </summary>
+        internal bool UsesDot => Token.Kind == TokKind.Dot;
 
-        // True if the name uses bangs, e.g. A!B!C
-        public bool UsesBang => Token.Kind == TokKind.Bang;
+        /// <summary>
+        /// True if the name uses bangs, e.g. A!B!C.
+        /// </summary>
+        internal bool UsesBang => Token.Kind == TokKind.Bang;
 
-        // True if the name uses brackets, e.g. A[B]
-        public bool UsesBracket => Token.Kind == TokKind.BracketOpen;
+        /// <summary>
+        /// True if the name uses brackets, e.g. A[B].
+        /// </summary>
+        internal bool UsesBracket => Token.Kind == TokKind.BracketOpen;
 
-        public DottedNameNode(ref int idNext, Token primaryToken, SourceList sourceList, TexlNode left, Identifier right, TexlNode rightNode)
+        internal DottedNameNode(ref int idNext, Token primaryToken, SourceList sourceList, TexlNode left, Identifier right, TexlNode rightNode)
             : base(ref idNext, primaryToken, sourceList)
         {
             Contracts.AssertValue(primaryToken);
@@ -58,7 +77,7 @@ namespace Microsoft.PowerFx.Core.Syntax.Nodes
             MinChildID = Math.Min(left.MinChildID, rightNode?.MinChildID ?? MinChildID);
         }
 
-        public bool Matches(DName leftIdentifier, DName rightIdentifier)
+        internal bool Matches(DName leftIdentifier, DName rightIdentifier)
         {
             Contracts.AssertValid(leftIdentifier);
             Contracts.AssertValid(rightIdentifier);
@@ -66,7 +85,7 @@ namespace Microsoft.PowerFx.Core.Syntax.Nodes
             return Left is FirstNameNode leftName && leftName.Ident.Name == leftIdentifier && Right.Name == rightIdentifier;
         }
 
-        public override TexlNode Clone(ref int idNext, Span ts)
+        internal override TexlNode Clone(ref int idNext, Span ts)
         {
             var left = Left.Clone(ref idNext, ts);
             var newNodes = new Dictionary<TexlNode, TexlNode>
@@ -90,6 +109,7 @@ namespace Microsoft.PowerFx.Core.Syntax.Nodes
             return clonedNode;
         }
 
+        /// <inheritdoc />
         public override void Accept(TexlVisitor visitor)
         {
             Contracts.AssertValue(visitor);
@@ -100,21 +120,26 @@ namespace Microsoft.PowerFx.Core.Syntax.Nodes
             }
         }
 
+        /// <inheritdoc />
         public override TResult Accept<TResult, TContext>(TexlFunctionalVisitor<TResult, TContext> visitor, TContext context)
         {
             return visitor.Visit(this, context);
         }
 
-        public override DottedNameNode CastDottedName()
+        internal override DottedNameNode CastDottedName()
         {
             return this;
         }
 
-        public override DottedNameNode AsDottedName()
+        internal override DottedNameNode AsDottedName()
         {
             return this;
         }
 
+        /// <summary>
+        /// The <see cref=" DPath" /> representation of the dotted name parse node.
+        /// </summary>
+        /// <returns></returns>
         public DPath ToDPath()
         {
             Contracts.Assert(HasPossibleNamespaceQualifier);
@@ -172,11 +197,13 @@ namespace Microsoft.PowerFx.Core.Syntax.Nodes
             return path;
         }
 
+        /// <inheritdoc />
         public override Span GetTextSpan()
         {
             return new Span(Token.VerifyValue().Span.Min, Right.VerifyValue().Token.VerifyValue().Span.Lim);
         }
 
+        /// <inheritdoc />
         public override Span GetCompleteSpan()
         {
             var min = Token.Span.Min;

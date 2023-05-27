@@ -21,6 +21,9 @@
 >> $""
 ""
 
+>> $"{}"
+Errors: Error 3-4: Empty expressions cannot appear inside an interpolated string.
+
 >> $"Hello"
 "Hello"
 
@@ -70,10 +73,10 @@ Errors: Error 2-2: Unexpected characters. Characters are used in the formula in 
 "! 1/1/1980 !"
 
 >> $""""
-"""
+""""
 
 >> """"
-"""
+""""
 
 >> $"! {With({a:4,b:6},a*b)} !"
 "! 24 !"
@@ -88,7 +91,7 @@ Errors: Error 2-2: Unexpected characters. Characters are used in the formula in 
 "! !"
 
 >> $"! "" !"
-"! " !"
+"! "" !"
 
 >> $"! {{1,2}} !"
 "! {1,2} !"
@@ -109,4 +112,13 @@ Errors: Error 6-15: Invalid argument type (Record). Expecting a Text value inste
 Errors: Error 9-10: Unexpected characters. Characters are used in the formula in an unexpected way.|Error 10-10: Unexpected characters. Characters are used in the formula in an unexpected way.
 
 >> $"Hello {}"
-"Hello "
+Errors: Error 9-10: Empty expressions cannot appear inside an interpolated string.
+
+>> $"! { {a:1,b:2}.a } !"
+"! 1 !"
+
+>> $"! {First([{a:1,b:2}.a]).Value} !"
+"! 1 !"
+
+>> First([$"{ {a:1,b:2,c:3}.a }"]).Value
+"1"

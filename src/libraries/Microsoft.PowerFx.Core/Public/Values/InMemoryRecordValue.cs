@@ -1,47 +1,88 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.Contracts;
-using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.PowerFx.Core.IR;
-using Microsoft.PowerFx.Core.Public.Types;
-using Microsoft.PowerFx.Core.Utils;
 
-namespace Microsoft.PowerFx.Core.Public.Values
+namespace Microsoft.PowerFx.Types
 {
+    // Represent record backed by known list of values. 
     internal class InMemoryRecordValue : RecordValue
     {
-        private readonly Dictionary<string, FormulaValue> _fields = new Dictionary<string, FormulaValue>();
-
-        public override IEnumerable<NamedValue> Fields =>
-            from field in _fields select new NamedValue(field);
+        protected readonly IReadOnlyDictionary<string, FormulaValue> _fields;
+        private readonly IDictionary<string, FormulaValue> _mutableFields;
 
         public InMemoryRecordValue(IRContext irContext, IEnumerable<NamedValue> fields)
+          : this(irContext, ToDict(fields))
+        {
+        }
+
+        public InMemoryRecordValue(IRContext irContext, params NamedValue[] fields)
+          : this(irContext, ToDict(fields))
+        {
+        }
+
+        public InMemoryRecordValue(IRContext irContext, IReadOnlyDictionary<string, FormulaValue> fields)
             : base(irContext)
         {
             Contract.Assert(IRContext.ResultType is RecordType);
-            var recordType = (RecordType)IRContext.ResultType;
-            var fieldDictionary = recordType.GetNames().ToDictionary(v => v.Name);
-            foreach (var field in fields)
+
+            _fields = fields;
+            _mutableFields = fields as IDictionary<string, FormulaValue>;
+
+            if (_mutableFields.IsReadOnly)
             {
-                _fields[field.Name] = PropagateFieldType(field.Value, fieldDictionary[new DName(field.Name)].Type);
+                _mutableFields = null;
             }
         }
 
-        private FormulaValue PropagateFieldType(FormulaValue fieldValue, FormulaType fieldType)
+        private static IReadOnlyDictionary<string, FormulaValue> ToDict(IEnumerable<NamedValue> fields)
         {
-            if (fieldValue is RecordValue recordValue)
+            var dict = new Dictionary<string, FormulaValue>(StringComparer.Ordinal);
+            foreach (var field in fields)
             {
-                return new InMemoryRecordValue(IRContext.NotInSource(fieldType), recordValue.Fields);
+                dict[field.Name] = field.Value;
             }
 
-            if (fieldValue is TableValue tableValue)
+            return dict;
+        }
+
+        protected override bool TryGetField(FormulaType fieldType, string fieldName, out FormulaValue result)
+        {
+            return _fields.TryGetValue(fieldName, out result);
+        }
+
+        public override async Task<DValue<RecordValue>> UpdateFieldsAsync(RecordValue changeRecord, CancellationToken cancellationToken)
+        {
+            return await UpdateAllowedFieldsAsync(changeRecord, _fields, cancellationToken).ConfigureAwait(false);
+        }
+
+        protected async Task<DValue<RecordValue>> UpdateAllowedFieldsAsync(RecordValue changeRecord, IEnumerable<KeyValuePair<string, FormulaValue>> allowedFields, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (_mutableFields == null)
             {
-                return new InMemoryTableValue(IRContext.NotInSource(fieldType), tableValue.Rows);
+                return await base.UpdateFieldsAsync(changeRecord, cancellationToken).ConfigureAwait(false);
             }
 
-            return fieldValue;
+            await foreach (var field in changeRecord.GetFieldsAsync(cancellationToken).ConfigureAwait(false))
+            {
+                _mutableFields[field.Name] = field.Value;
+            }
+
+            var fields = new List<NamedValue>();
+
+            foreach (var kvp in allowedFields)
+            {
+                fields.Add(new NamedValue(kvp.Key, kvp.Value));
+            }
+
+            return DValue<RecordValue>.Of(NewRecordFromFields(fields));
         }
     }
 }

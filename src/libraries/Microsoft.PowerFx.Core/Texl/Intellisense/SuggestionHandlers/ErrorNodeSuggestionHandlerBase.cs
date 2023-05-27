@@ -1,11 +1,10 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
-namespace Microsoft.PowerFx.Core.Texl.Intellisense
+namespace Microsoft.PowerFx.Intellisense
 {
     internal partial class Intellisense
     {
@@ -23,6 +22,13 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
                 // For Error Kind, suggest top level values only in the context of a callNode and
                 // ThisItemProperties only in the context of thisItem.
                 var curNode = intellisenseData.CurNode;
+
+                // If the parent is a StrInterp node and current node is an error node (not an island)
+                // this node will always be a partial string literal and we should not provide suggestions
+                if (curNode.Parent != null && curNode.Parent.Kind == NodeKind.StrInterp)
+                {
+                    return true;
+                }
 
                 // Three methods that implement custom behavior here, one that adds suggestions before
                 // top level suggestions are added, one after, and one to handle the case where there aren't

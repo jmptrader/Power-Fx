@@ -37,6 +37,10 @@ namespace Microsoft.PowerFx.Core.Localization
         public static StringGetter CountIfArg1 = (b) => StringResources.Get("CountIfArg1", b);
         public static StringGetter CountIfArg2 = (b) => StringResources.Get("CountIfArg2", b);
 
+        public static StringGetter AboutSet = (b) => StringResources.Get("AboutSet", b);
+        public static StringGetter SetArg1 = (b) => StringResources.Get("SetArg1", b);
+        public static StringGetter SetArg2 = (b) => StringResources.Get("SetArg2", b);
+
         public static StringGetter AboutSumT = (b) => StringResources.Get("AboutSumT", b);
         public static StringGetter AboutMaxT = (b) => StringResources.Get("AboutMaxT", b);
         public static StringGetter AboutMinT = (b) => StringResources.Get("AboutMinT", b);
@@ -82,11 +86,25 @@ namespace Microsoft.PowerFx.Core.Localization
         public static StringGetter TextArg3 = (b) => StringResources.Get("TextArg3", b);
 
         public static StringGetter AboutValue = (b) => StringResources.Get("AboutValue", b);
+        public static StringGetter AboutFloat = (b) => StringResources.Get("AboutFloat", b);
+        public static StringGetter AboutDecimal = (b) => StringResources.Get("AboutDecimal", b);
         public static StringGetter ValueArg1 = (b) => StringResources.Get("ValueArg1", b);
         public static StringGetter ValueArg2 = (b) => StringResources.Get("ValueArg2", b);
 
         public static StringGetter AboutBoolean = (b) => StringResources.Get("AboutBoolean", b);
         public static StringGetter BooleanArg1 = (b) => StringResources.Get("BooleanArg1", b);
+        public static StringGetter AboutBooleanT = (b) => StringResources.Get("AboutBooleanT", b);
+        public static StringGetter BooleanTArg1 = (b) => StringResources.Get("BooleanTArg1", b);
+
+        public static StringGetter AboutBooleanN = (b) => StringResources.Get("AboutBooleanN", b);
+        public static StringGetter BooleanNArg1 = (b) => StringResources.Get("BooleanNArg1", b);
+        public static StringGetter AboutBooleanNT = (b) => StringResources.Get("AboutBooleanNT", b);
+        public static StringGetter BooleanNTArg1 = (b) => StringResources.Get("BooleanNTArg1", b);
+
+        public static StringGetter AboutBooleanB = (b) => StringResources.Get("AboutBooleanB", b);
+        public static StringGetter BooleanBArg1 = (b) => StringResources.Get("BooleanBArg1", b);
+        public static StringGetter AboutBooleanBT = (b) => StringResources.Get("AboutBooleanBT", b);
+        public static StringGetter BooleanBTArg1 = (b) => StringResources.Get("BooleanBTArg1", b);
 
         public static StringGetter AboutConcatenate = (b) => StringResources.Get("AboutConcatenate", b);
         public static StringGetter ConcatenateArg1 = (b) => StringResources.Get("ConcatenateArg1", b);
@@ -148,6 +166,10 @@ namespace Microsoft.PowerFx.Core.Localization
         public static StringGetter SortArg1 = (b) => StringResources.Get("SortArg1", b);
         public static StringGetter SortArg2 = (b) => StringResources.Get("SortArg2", b);
         public static StringGetter SortArg3 = (b) => StringResources.Get("SortArg3", b);
+
+        public static StringGetter AboutDistinct = (b) => StringResources.Get("AboutDistinct", b);
+        public static StringGetter DistinctArg1 = (b) => StringResources.Get("DistinctArg1", b);
+        public static StringGetter DistinctArg2 = (b) => StringResources.Get("DistinctArg2", b);
 
         public static StringGetter AboutSortByColumns = (b) => StringResources.Get("AboutSortByColumns", b);
         public static StringGetter SortByColumnsArg1 = (b) => StringResources.Get("SortByColumnsArg1", b);
@@ -211,6 +233,8 @@ namespace Microsoft.PowerFx.Core.Localization
         public static StringGetter AboutSqrtT = (b) => StringResources.Get("AboutSqrtT", b);
         public static StringGetter MathFuncArg1 = (b) => StringResources.Get("MathFuncArg1", b);
         public static StringGetter MathTFuncArg1 = (b) => StringResources.Get("MathTFuncArg1", b);
+        public static StringGetter MathFuncArg2 = (b) => StringResources.Get("MathFuncArg2", b);
+        public static StringGetter MathTFuncArg2 = (b) => StringResources.Get("MathTFuncArg2", b);
 
         public static StringGetter AboutInt = (b) => StringResources.Get("AboutInt", b);
         public static StringGetter AboutIntT = (b) => StringResources.Get("AboutIntT", b);
@@ -335,6 +359,7 @@ namespace Microsoft.PowerFx.Core.Localization
         public static StringGetter AboutClock__AmPmShort = (b) => StringResources.Get("AboutClock__AmPmShort", b);
         public static StringGetter AboutClock__IsClock24 = (b) => StringResources.Get("AboutClock__IsClock24", b);
 
+        public static StringGetter AboutDateTime = (b) => StringResources.Get("AboutDateTime", b);
         public static StringGetter AboutDateValue = (b) => StringResources.Get("AboutDateValue", b);
         public static StringGetter DateValueArg1 = (b) => StringResources.Get("DateValueArg1", b);
         public static StringGetter DateValueArg2 = (b) => StringResources.Get("DateValueArg2", b);
@@ -431,12 +456,70 @@ namespace Microsoft.PowerFx.Core.Localization
         public static StringGetter SequenceArg2 = (b) => StringResources.Get("SequenceArg2", b);
         public static StringGetter SequenceArg3 = (b) => StringResources.Get("SequenceArg3", b);
 
-        public static StringGetter AboutParseJson = (b) => StringResources.Get("AboutParseJson", b);
-        public static StringGetter ParseJsonArg1 = (b) => StringResources.Get("ParseJsonArg1", b);
+        public static StringGetter AboutParseJSON = (b) => StringResources.Get("AboutParseJSON", b);
+        public static StringGetter ParseJSONArg1 = (b) => StringResources.Get("ParseJSONArg1", b);
 
         public static StringGetter AboutIndex = (b) => StringResources.Get("AboutIndex", b);
         public static StringGetter IndexArg1 = (b) => StringResources.Get("IndexArg1", b);
         public static StringGetter IndexArg2 = (b) => StringResources.Get("IndexArg2", b);
+
+        public static StringGetter AboutPatch = (b) => StringResources.Get("AboutPatch", b);
+        public static StringGetter PatchDataSourceArg = (b) => StringResources.Get("PatchDataSourceArg", b);
+        public static StringGetter PatchBaseRecordArg = (b) => StringResources.Get("PatchBaseRecordArg", b);
+        public static StringGetter PatchChangeRecordsArg = (b) => StringResources.Get("PatchChangeRecordsArg", b);
+
+        public static StringGetter AboutCollect = (b) => StringResources.Get("AboutCollect", b);
+        public static StringGetter CollectDataSourceArg = (b) => StringResources.Get("CollectDataSourceArg", b);
+        public static StringGetter CollectRecordArg = (b) => StringResources.Get("CollectRecordArg", b);
+
+        public static StringGetter AboutClearCollect = (b) => StringResources.Get("AboutClearCollect", b);
+        public static StringGetter ClearCollectDataSourceArg = (b) => StringResources.Get("ClearCollectDataSourceArg", b);
+        public static StringGetter ClearCollectRecordArg = (b) => StringResources.Get("ClearCollectRecordArg", b);
+
+        public static StringGetter AboutClear = (b) => StringResources.Get("AboutClear", b);
+        public static StringGetter ClearCollectionArg = (b) => StringResources.Get("ClearCollectionArg", b);
+
+        public static StringGetter AboutRemove = (b) => StringResources.Get("AboutRemove", b);
+        public static StringGetter RemoveDataSourceArg = (b) => StringResources.Get("RemoveDataSourceArg", b);
+        public static StringGetter RemoveRecordsArg = (b) => StringResources.Get("RemoveRecordsArg", b);
+
+        public static StringGetter AboutDec2Hex = (b) => StringResources.Get("AboutDec2Hex", b);
+        public static StringGetter Dec2HexArg1 = (b) => StringResources.Get("Dec2HexArg1", b);
+        public static StringGetter Dec2HexArg2 = (b) => StringResources.Get("Dec2HexArg2", b);
+
+        public static StringGetter AboutDec2HexT = (b) => StringResources.Get("AboutDec2HexT", b);
+        public static StringGetter Dec2HexTArg1 = (b) => StringResources.Get("Dec2HexTArg1", b);
+        public static StringGetter Dec2HexTArg2 = (b) => StringResources.Get("Dec2HexTArg2", b);
+
+        public static StringGetter AboutHex2Dec = (b) => StringResources.Get("AboutHex2Dec", b);
+        public static StringGetter Hex2DecArg1 = (b) => StringResources.Get("Hex2DecArg1", b);
+
+        public static StringGetter AboutHex2DecT = (b) => StringResources.Get("AboutHex2DecT", b);
+        public static StringGetter Hex2DecTArg1 = (b) => StringResources.Get("Hex2DecTArg1", b);
+
+        public static StringGetter AboutOptionSetInfo = (b) => StringResources.Get("AboutOptionSetInfo", b);
+        public static StringGetter AboutOptionSetInfoArg1 = (b) => StringResources.Get("AboutOptionSetInfoArg1", b);
+
+        public static StringGetter AboutLanguage = (b) => StringResources.Get("AboutLanguage", b);
+
+        public static StringGetter AboutEncodeUrl = (b) => StringResources.Get("AboutEncodeUrl", b);
+        public static StringGetter EncodeUrlArg1 = (b) => StringResources.Get("EncodeUrlArg1", b);
+        
+        public static StringGetter AboutPlainText = (b) => StringResources.Get("AboutPlainText", b);
+        public static StringGetter PlainTextArg1 = (b) => StringResources.Get("PlainTextArg1", b);
+
+        public static StringGetter AboutIsMatch = (b) => StringResources.Get("AboutIsMatch", b);
+        public static StringGetter AboutMatch = (b) => StringResources.Get("AboutMatch", b);
+        public static StringGetter AboutMatchAll = (b) => StringResources.Get("AboutMatchAll", b);
+        public static StringGetter IsMatchArg1 = (b) => StringResources.Get("IsMatchArg1", b);
+        public static StringGetter IsMatchArg2 = (b) => StringResources.Get("IsMatchArg2", b);
+        public static StringGetter IsMatchArg3 = (b) => StringResources.Get("IsMatchArg3", b);
+        public static StringGetter MatchArg1 = (b) => StringResources.Get("MatchArg1", b);
+        public static StringGetter MatchArg2 = (b) => StringResources.Get("MatchArg2", b);
+        public static StringGetter MatchArg3 = (b) => StringResources.Get("MatchArg3", b);
+
+        public static StringGetter AboutRefresh = (b) => StringResources.Get("AboutRefresh", b);
+        public static StringGetter RefreshArg1 = (b) => StringResources.Get("RefreshArg1", b);
 
         // Previously, errors were listed here in the form of a StringGetter, which would be evaluated to fetch
         // an error message to pass to the BaseError class constructor. We are switching to passing the message key itself
@@ -452,6 +535,7 @@ namespace Microsoft.PowerFx.Core.Localization
         public static ErrorResourceKey ErrMissingEndOfBlockComment = new ErrorResourceKey("ErrMissingEndOfBlockComment");
         public static ErrorResourceKey ErrExpectedFound_Ex_Fnd = new ErrorResourceKey("ErrExpectedFound_Ex_Fnd");
         public static ErrorResourceKey ErrInvalidName = new ErrorResourceKey("ErrInvalidName");
+        public static ErrorResourceKey ErrInvalidIdentifier = new ErrorResourceKey("ErrInvalidIdentifier");
         public static ErrorResourceKey ErrInvalidPropertyAccess = new ErrorResourceKey("ErrInvalidPropertyAccess");
         public static ErrorResourceKey ErrInvalidPropertyReference = new ErrorResourceKey("ErrInvalidPropertyReference");
         public static ErrorResourceKey ErrInvalidParentUse = new ErrorResourceKey("ErrInvalidParentUse");
@@ -459,6 +543,8 @@ namespace Microsoft.PowerFx.Core.Localization
         public static ErrorResourceKey ErrRuleNestedTooDeeply = new ErrorResourceKey("ErrRuleNestedTooDeeply");
         public static ErrorResourceKey ErrInvalidDot = new ErrorResourceKey("ErrInvalidDot");
         public static ErrorResourceKey ErrUnknownFunction = new ErrorResourceKey("ErrUnknownFunction");
+        public static ErrorResourceKey ErrUnimplementedFunction = new ErrorResourceKey("ErrUnimplementedFunction");
+        public static ErrorResourceKey ErrUnknownNamespaceFunction = new ErrorResourceKey("ErrUnknownNamespaceFunction");
         public static ErrorResourceKey ErrBadArity = new ErrorResourceKey("ErrBadArity");
         public static ErrorResourceKey ErrBadArityRange = new ErrorResourceKey("ErrBadArityRange");
         public static ErrorResourceKey ErrBadArityMinimum = new ErrorResourceKey("ErrBadArityMinimum");
@@ -479,19 +565,22 @@ namespace Microsoft.PowerFx.Core.Localization
         public static ErrorResourceKey ErrInternalControlInInputProperty = new ErrorResourceKey("ErrInternalControlInInputProperty");
         public static ErrorResourceKey ErrColumnNotAccessibleInCurrentContext = new ErrorResourceKey("ErrColumnNotAccessibleInCurrentContext");
         public static ErrorResourceKey WrnRowScopeOneToNExpandNumberOfCalls = new ErrorResourceKey("WrnRowScopeOneToNExpandNumberOfCalls");
-        public static ErrorResourceKey ErrInvalidSchemaNeedStringCol_Col = new ErrorResourceKey("ErrInvalidSchemaNeedStringCol_Col");
-        public static ErrorResourceKey ErrInvalidSchemaNeedNumCol_Col = new ErrorResourceKey("ErrInvalidSchemaNeedNumCol_Col");
-        public static ErrorResourceKey ErrInvalidSchemaNeedDateCol_Col = new ErrorResourceKey("ErrInvalidSchemaNeedDateCol_Col");
-        public static ErrorResourceKey ErrInvalidSchemaNeedColorCol_Col = new ErrorResourceKey("ErrInvalidSchemaNeedColorCol_Col");
+        public static ErrorResourceKey ErrInvalidSchemaNeedTypeCol_Col = new ErrorResourceKey("ErrInvalidSchemaNeedTypeCol_Col");
         public static ErrorResourceKey ErrInvalidSchemaNeedCol = new ErrorResourceKey("ErrInvalidSchemaNeedCol");
         public static ErrorResourceKey ErrNeedRecord = new ErrorResourceKey("ErrNeedRecord");
         public static ErrorResourceKey ErrAutoRefreshNotAllowed = new ErrorResourceKey("ErrAutoRefreshNotAllowed");
         public static ErrorResourceKey ErrIncompatibleRecord = new ErrorResourceKey("ErrIncompatibleRecord");
         public static ErrorResourceKey ErrNeedRecord_Func = new ErrorResourceKey("ErrNeedRecord_Func");
         public static ErrorResourceKey ErrNeedEntity_EntityName = new ErrorResourceKey("ErrNeedEntity_EntityName");
+        public static ErrorResourceKey ErrNeedValidVariableName_Arg = new ErrorResourceKey("ErrNeedValidVariableName_Arg");
         public static ErrorResourceKey ErrOperatorExpected = new ErrorResourceKey("ErrOperatorExpected");
         public static ErrorResourceKey ErrNumberExpected = new ErrorResourceKey("ErrNumberExpected");
         public static ErrorResourceKey ErrNumberTooLarge = new ErrorResourceKey("ErrNumberTooLarge");
+        public static ErrorResourceKey ErrReservedKeyword = new ErrorResourceKey("ErrReservedKeyword");
+        public static ErrorResourceKey ErrTextTooLarge = new ErrorResourceKey("ErrTextTooLarge");
+        public static ErrorResourceKey ErrTextFormatTooLarge = new ErrorResourceKey("ErrTextFormatTooLarge");
+        public static ErrorResourceKey ErrTextInvalidFormat = new ErrorResourceKey("ErrTextInvalidFormat");
+        public static ErrorResourceKey ErrTextInvalidArgDateTime = new ErrorResourceKey("ErrTextInvalidArgDateTime");
         public static ErrorResourceKey ErrBooleanExpected = new ErrorResourceKey("ErrBooleanExpected");
         public static ErrorResourceKey ErrOnlyOneViewExpected = new ErrorResourceKey("ErrOnlyOneViewExpected");
         public static ErrorResourceKey ErrViewFromCurrentTableExpected = new ErrorResourceKey("ErrViewFromCurrentTableExpected");
@@ -508,15 +597,19 @@ namespace Microsoft.PowerFx.Core.Localization
         public static ErrorResourceKey ErrEmptyInvalidIdentifier = new ErrorResourceKey("ErrEmptyInvalidIdentifier");
         public static ErrorResourceKey ErrIncompatibleTypes = new ErrorResourceKey("ErrIncompatibleTypes");
         public static ErrorResourceKey ErrIncompatibleTypesForEquality_Left_Right = new ErrorResourceKey("ErrIncompatibleTypesForEquality_Left_Right");
+        public static ErrorResourceKey ErrUnOrderedTypeForComparison_Type = new ErrorResourceKey("ErrUnOrderedTypeForComparison_Type");
         public static ErrorResourceKey ErrServiceFunctionUnknownOptionalParam_Name = new ErrorResourceKey("ErrServiceFunctionUnknownOptionalParam_Name");
         public static ErrorResourceKey ErrColumnTypeMismatch_ColName_ExpectedType_ActualType = new ErrorResourceKey("ErrColumnTypeMismatch_ColName_ExpectedType_ActualType");
         public static ErrorResourceKey ErrColumnMissing_ColName_ExpectedType = new ErrorResourceKey("ErrColumnMissing_ColName_ExpectedType");
         public static ErrorResourceKey ErrTableDoesNotAcceptThisType = new ErrorResourceKey("ErrTableDoesNotAcceptThisType");
+        public static ErrorResourceKey ErrRecordDoesNotAcceptThisType = new ErrorResourceKey("ErrRecordDoesNotAcceptThisType");
         public static ErrorResourceKey ErrTypeError = new ErrorResourceKey("ErrTypeError");
         public static ErrorResourceKey ErrTypeError_Ex1_Ex2_Found = new ErrorResourceKey("ErrTypeError_Ex1_Ex2_Found");
         public static ErrorResourceKey ErrTypeError_Arg_Expected_Found = new ErrorResourceKey("ErrTypeError_Arg_Expected_Found");
+        public static ErrorResourceKey ErrTypeError_WrongType = new ErrorResourceKey("ErrTypeError_WrongType");
         public static ErrorResourceKey ErrTypeErrorRecordIncompatibleWithSource = new ErrorResourceKey("ErrTypeErrorRecordIncompatibleWithSource");
         public static ErrorResourceKey ErrExpectedStringLiteralArg_Name = new ErrorResourceKey("ErrExpectedStringLiteralArg_Name");
+        public static ErrorResourceKey ErrExpectedIdentifierArg_Name = new ErrorResourceKey("ErrExpectedIdentifierArg_Name");
         public static ErrorResourceKey ErrArgNotAValidIdentifier_Name = new ErrorResourceKey("ErrArgNotAValidIdentifier_Name");
         public static ErrorResourceKey ErrColExists_Name = new ErrorResourceKey("ErrColExists_Name");
         public static ErrorResourceKey ErrColConflict_Name = new ErrorResourceKey("ErrColConflict_Name");
@@ -524,6 +617,7 @@ namespace Microsoft.PowerFx.Core.Localization
         public static ErrorResourceKey ErrColumnDoesNotExist_Name_Similar = new ErrorResourceKey("ErrColumnDoesNotExist_Name_Similar");
         public static ErrorResourceKey ErrSortIncorrectOrder = new ErrorResourceKey("ErrSortIncorrectOrder");
         public static ErrorResourceKey ErrSortWrongType = new ErrorResourceKey("ErrSortWrongType");
+        public static ErrorResourceKey ErrDistinctWrongType = new ErrorResourceKey("ErrDistinctWrongType");
         public static ErrorResourceKey ErrFunctionDoesNotAcceptThisType_Function_Expected = new ErrorResourceKey("ErrFunctionDoesNotAcceptThisType_Function_Expected");
         public static ErrorResourceKey ErrIncorrectFormat_Func = new ErrorResourceKey("ErrIncorrectFormat_Func");
         public static ErrorResourceKey ErrAsyncLambda = new ErrorResourceKey("ErrAsyncLambda");
@@ -534,6 +628,18 @@ namespace Microsoft.PowerFx.Core.Localization
         public static ErrorResourceKey ErrAsTypeAndIsTypeExpectConnectedDataSource = new ErrorResourceKey("ErrAsTypeAndIsTypeExpectConnectedDataSource");
         public static ErrorResourceKey ErrInvalidControlReference = new ErrorResourceKey("ErrInvalidControlReference");
         public static ErrorResourceKey ErrInvalidStringInterpolation = new ErrorResourceKey("ErrInvalidStringInterpolation");
+        public static ErrorResourceKey ErrEmptyIsland = new ErrorResourceKey("ErrEmptyIsland");
+        public static ErrorResourceKey ErrDeprecated = new ErrorResourceKey("ErrDeprecated");
+        public static ErrorResourceKey ErrInvalidFunction = new ErrorResourceKey("ErrInvalidFunction");
+        public static ErrorResourceKey ErrUntypedObjectScope = new ErrorResourceKey("ErrUntypedObjectScope");
+        public static ErrorResourceKey ErrDataSourceCannotBeRefreshed = new ErrorResourceKey("ErrDataSourceCannotBeRefreshed");
+        public static ErrorResourceKey ErrNeedAgg = new ErrorResourceKey("ErrNeedAgg");
+
+        public static ErrorResourceKey ErrInvalidRegEx = new ErrorResourceKey("ErrInvalidRegEx");
+        public static ErrorResourceKey ErrVariableRegEx = new ErrorResourceKey("ErrVariableRegEx");
+        public static ErrorResourceKey InfoRegExCaptureNameHidesPredefinedFullMatchField = new ErrorResourceKey("InfoRegExCaptureNameHidesPredefinedFullMatchField");
+        public static ErrorResourceKey InfoRegExCaptureNameHidesPredefinedSubMatchesField = new ErrorResourceKey("InfoRegExCaptureNameHidesPredefinedSubMatchesField");
+        public static ErrorResourceKey InfoRegExCaptureNameHidesPredefinedStartMatchField = new ErrorResourceKey("InfoRegExCaptureNameHidesPredefinedStartMatchField");
 
         public static ErrorResourceKey ErrErrorIrrelevantField = new ErrorResourceKey("ErrErrorIrrelevantField");
         public static ErrorResourceKey ErrAsNotInContext = new ErrorResourceKey("ErrAsNotInContext");
@@ -541,6 +647,7 @@ namespace Microsoft.PowerFx.Core.Localization
         public static ErrorResourceKey WarnColumnNameSpecifiedMultipleTimes_Name = new ErrorResourceKey("WarnColumnNameSpecifiedMultipleTimes_Name");
         public static ErrorResourceKey WarnLiteralPredicate = new ErrorResourceKey("WarnLiteralPredicate");
         public static ErrorResourceKey WarnDynamicMetadata = new ErrorResourceKey("WarnDynamicMetadata");
+        public static ErrorResourceKey WarnDeferredType = new ErrorResourceKey("WarnDeferredType");
 
         public static StringGetter InfoMessage = (b) => StringResources.Get("InfoMessage", b);
         public static StringGetter InfoNode_Node = (b) => StringResources.Get("InfoNode_Node", b);
@@ -557,9 +664,28 @@ namespace Microsoft.PowerFx.Core.Localization
         public static ErrorResourceKey OpNotSupportedByClientSuggestionMessage_OpNotSupportedByClient = new ErrorResourceKey("SuggestRemoteExecutionHint_OpNotSupportedByClient");
 
         public static ErrorResourceKey ErrNamedFormula_MissingSemicolon = new ErrorResourceKey("ErrNamedFormula_MissingSemicolon");
+        public static ErrorResourceKey ErrNamedFormula_MissingValue = new ErrorResourceKey("ErrNamedFormula_MissingValue");
+        public static ErrorResourceKey ErrUDF_MissingFunctionBody = new ErrorResourceKey("ErrUDF_MissingFunctionBody");
+        public static ErrorResourceKey ErrNamedFormula_AlreadyDefined = new ErrorResourceKey("ErrNamedFormula_AlreadyDefined");
+        public static ErrorResourceKey ErrorResource_NameConflict = new ErrorResourceKey("ErrorResource_NameConflict");
+        public static ErrorResourceKey ErrUDF_FunctionAlreadyDefined = new ErrorResourceKey("ErrUDF_FunctionAlreadyDefined");
+        public static ErrorResourceKey ErrUDF_DuplicateParameter = new ErrorResourceKey("ErrUDF_DuplicateParameter");
+        public static ErrorResourceKey ErrUDF_UnknownType = new ErrorResourceKey("ErrUDF_UnknownType");
+        public static ErrorResourceKey ErrUDF_ReturnTypeDoesNotMatch = new ErrorResourceKey("ErrUDF_ReturnTypeDoesNotMatch");
 
         // ErrorResourceKey for creating an error from an arbitrary string message. The key resolves to "{0}", meaning
         // that a single string arg can be supplied representing the entire text of the error.
         public static ErrorResourceKey ErrGeneralError = new ErrorResourceKey("ErrGeneralError");
+        public static ErrorResourceKey ErrRemoveAllArg = new ErrorResourceKey("ErrRemoveAllArg");
+
+        public static ErrorResourceKey OptionSetOptionNotSupported = new ErrorResourceKey("OptionSetOptionNotSupported");
+
+        public static ErrorResourceKey InvalidCast = new ErrorResourceKey("InvalidCast");
+
+        public static ErrorResourceKey WrnDelagationTableNotSupported = new ErrorResourceKey("WrnDelagationTableNotSupported");
+        public static ErrorResourceKey WrnDelagationPredicate = new ErrorResourceKey("WrnDelagationPredicate");
+        public static ErrorResourceKey WrnDelagationOnlyPrimaryKeyField = new ErrorResourceKey("WrnDelagationOnlyPrimaryKeyField");
+        public static ErrorResourceKey WrnDelagationRefersThisRecord = new ErrorResourceKey("WrnDelagationRefersThisRecord");
+        public static ErrorResourceKey WrnDelagationBehaviorFunction = new ErrorResourceKey("WrnDelagationBehaviorFunction");
     }
 }

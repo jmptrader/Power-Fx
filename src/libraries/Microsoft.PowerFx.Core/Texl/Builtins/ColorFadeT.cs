@@ -7,9 +7,13 @@ using Microsoft.PowerFx.Core.Binding;
 using Microsoft.PowerFx.Core.Errors;
 using Microsoft.PowerFx.Core.Functions;
 using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
+using Microsoft.PowerFx.Core.Types.Enums;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
+
+#pragma warning disable SA1402 // File may only contain a single type
+#pragma warning disable SA1649 // File name should match first type name
 
 namespace Microsoft.PowerFx.Core.Texl.Builtins
 {
@@ -20,18 +24,19 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
 
         public override bool IsSelfContained => true;
 
-        public override bool SupportsParamCoercion => true;
-
         public ColorFadeTFunction()
             : base("ColorFade", TexlStrings.AboutColorFadeT, FunctionCategories.Table, DType.EmptyTable, 0, 2, 2)
         {
         }
 
-        public override bool IsTrackedInTelemetry => false;
-
         public override IEnumerable<TexlStrings.StringGetter[]> GetSignatures()
         {
             yield return new[] { TexlStrings.ColorFadeTArg1, TexlStrings.ColorFadeTArg2 };
+        }
+
+        public override IEnumerable<string> GetRequiredEnumNames()
+        {
+            return new List<string>() { LanguageConstants.ColorEnumString };
         }
 
         public override string GetUniqueTexlRuntimeName(bool isPrefetching = false)
@@ -39,7 +44,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             return GetUniqueTexlRuntimeName(suffix: "_T");
         }
 
-        public override bool CheckInvocation(TexlBinding binding, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
+        public override bool CheckTypes(CheckTypesContext context, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
         {
             Contracts.AssertValue(args);
             Contracts.AssertAllValues(args);
@@ -48,7 +53,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             Contracts.AssertValue(errors);
             Contracts.Assert(MinArity <= args.Length && args.Length <= MaxArity);
 
-            var fValid = CheckInvocation(args, argTypes, errors, out returnType, out nodeToCoercedTypeMap);
+            var fValid = base.CheckTypes(context, args, argTypes, errors, out returnType, out nodeToCoercedTypeMap);
 
             var type0 = argTypes[0];
             var type1 = argTypes[1];
@@ -60,16 +65,13 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             if (type0.IsTable)
             {
                 // Ensure we have a one-column table of colors.
-                fValid &= CheckColorColumnType(type0, args[0], errors, ref nodeToCoercedTypeMap);
-
-                // Borrow the return type from the 1st arg.
-                returnType = type0;
+                fValid &= CheckColorColumnType(context, args[0], type0, errors, ref nodeToCoercedTypeMap, out returnType);
 
                 // Check arg1 below.
                 otherArg = args[1];
                 otherType = type1;
 
-                fValid &= CheckOtherType(otherType, otherArg, DType.Number, errors, ref nodeToCoercedTypeMap);
+                fValid &= CheckOtherType(context, otherType, otherArg, DType.Number, errors, ref nodeToCoercedTypeMap);
 
                 Contracts.Assert(returnType.IsTable);
                 Contracts.Assert(!fValid || returnType.IsColumn);
@@ -77,16 +79,16 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             else if (type1.IsTable)
             {
                 // Ensure we have a one-column table of numerics.
-                fValid &= CheckNumericColumnType(type1, args[1], errors, ref nodeToCoercedTypeMap);
+                fValid &= CheckNumericColumnType(context, args[1], type1, errors, ref nodeToCoercedTypeMap);
 
                 // Since the 1st arg is not a table, make a new table return type *[Result:c]
-                returnType = DType.CreateTable(new TypedName(DType.Color, OneColumnTableResultName));
+                returnType = DType.CreateTable(new TypedName(DType.Color, GetOneColumnTableResultName(context.Features)));
 
                 // Check arg0 below.
                 otherArg = args[0];
                 otherType = type0;
 
-                fValid &= CheckOtherType(otherType, otherArg, DType.Color, errors, ref nodeToCoercedTypeMap);
+                fValid &= CheckOtherType(context, otherType, otherArg, DType.Color, errors, ref nodeToCoercedTypeMap);
 
                 Contracts.Assert(returnType.IsTable);
                 Contracts.Assert(!fValid || returnType.IsColumn);
@@ -105,7 +107,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             return fValid;
         }
 
-        private bool CheckOtherType(DType otherType, TexlNode otherArg, DType expectedType, IErrorContainer errors, ref Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
+        private bool CheckOtherType(CheckTypesContext context, DType otherType, TexlNode otherArg, DType expectedType, IErrorContainer errors, ref Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
         {
             Contracts.Assert(otherType.IsValid);
             Contracts.AssertValue(otherArg);
@@ -115,15 +117,15 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             if (otherType.IsTable)
             {
                 // Ensure we have a one-column table of numerics/color values based on expected type.
-                return expectedType == DType.Number ? CheckNumericColumnType(otherType, otherArg, errors, ref nodeToCoercedTypeMap) : CheckColorColumnType(otherType, otherArg, errors, ref nodeToCoercedTypeMap);
+                return CheckColumnType(context, otherArg, otherType, expectedType == DType.Number ? DType.Number : DType.Color, errors, ref nodeToCoercedTypeMap);
             }
 
-            if (expectedType.Accepts(otherType))
+            if (expectedType.Accepts(otherType, exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: context.Features.PowerFxV1CompatibilityRules))
             {
                 return true;
             }
 
-            if (otherType.CoercesTo(expectedType))
+            if (otherType.CoercesTo(expectedType, aggregateCoercion: true, isTopLevelCoercion: false, usePowerFxV1CompatibilityRules: context.Features.PowerFxV1CompatibilityRules))
             {
                 CollectionUtils.Add(ref nodeToCoercedTypeMap, otherArg, expectedType);
                 return true;
@@ -134,3 +136,6 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
         }
     }
 }
+
+#pragma warning restore SA1402 // File may only contain a single type
+#pragma warning restore SA1649 // File name should match first type name

@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Text;
 using Microsoft.PowerFx.Core.Utils;
 
@@ -10,11 +11,14 @@ namespace Microsoft.PowerFx.Core
 {
     // If there are multiple DisplayNameProviders associated with a type, we may have name conflicts
     // In that case, we block the use of display names using this provider
+    [ThreadSafeImmutable]
     internal class DisabledDisplayNameProvider : DisplayNameProvider
     {
-        public static DisabledDisplayNameProvider Instance { get; } = new DisabledDisplayNameProvider();
+        internal static DisabledDisplayNameProvider Instance { get; } = new DisabledDisplayNameProvider();
 
-        private DisabledDisplayNameProvider()
+        public override IEnumerable<KeyValuePair<DName, DName>> LogicalToDisplayPairs => ImmutableDictionary<DName, DName>.Empty;
+
+        internal DisabledDisplayNameProvider()
         {
         }
 
@@ -30,7 +34,7 @@ namespace Microsoft.PowerFx.Core
             return false;
         }
 
-        public override bool TryRemapLogicalAndDisplayNames(DName displayName, out DName logicalName, out DName newDisplayName)
+        internal override bool TryRemapLogicalAndDisplayNames(DName displayName, out DName logicalName, out DName newDisplayName)
         {
             logicalName = default;
             newDisplayName = default;

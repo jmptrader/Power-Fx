@@ -1,37 +1,69 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System.Globalization;
 using System.Linq;
-using Microsoft.PowerFx.Core.Errors;
-using Microsoft.PowerFx.Core.Lexer;
 using Microsoft.PowerFx.Core.Logging;
+using Microsoft.PowerFx.Core.Tests;
+using Microsoft.PowerFx.Syntax;
 using Xunit;
 using static Microsoft.PowerFx.Core.Parser.TexlParser;
 
 namespace Microsoft.PowerFx.Tests
 {
-    public sealed class FormatterTests
+    public sealed class FormatterTests : PowerFxTest
     {
         [Theory]
         [InlineData(
             "Collect(Yep, { a: [1], b: \"Hello\" })",
-            "Collect(#$firstname$#, { #$fieldname$#:[ #$number$# ], #$fieldname$#:#$string$# })")]
+            "Collect(#$firstname$#, { #$fieldname$#:[ #$decimal$# ], #$fieldname$#:#$string$# })")]
         [InlineData(
             "Set(x, 10 + 3); Launch(\"example.com\", ThisItem.Text, Parent.Text)",
-            "Set(#$firstname$#, #$number$# + #$number$#) ; Launch(#$string$#, #$firstname$#.#$righthandid$#, Parent.#$righthandid$#)")]
+            "Set(#$firstname$#, #$decimal$# + #$decimal$#) ; Launch(#$string$#, #$firstname$#.#$righthandid$#, Parent.#$righthandid$#)")]
         [InlineData(
             "$\"Hello {\"World\"}\"",
             "$\"#$string$##$string$#\"")]
         [InlineData(
             "$\"Hello {5}\"",
-            "$\"#$string$#{#$number$#}\"")]
+            "$\"#$string$#{#$decimal$#}\"")]
         public void TestStucturalPrint(string script, string expected)
         {
             var result = ParseScript(
                 script,
                 flags: Flags.EnableExpressionChaining);
 
-            Assert.Equal(expected, StructuralPrint.Print(result.Root));
+            Assert.Equal(expected, result.GetAnonymizedFormula());
+            
+            // Test same cases via CheckResult
+            var check = new CheckResult(new Engine());
+            check.SetText(script, new ParserOptions { AllowsSideEffects = true });
+            var result2 = check.ApplyGetLogging();
+            Assert.Equal(expected, result2);
+        }
+
+        private class TestSanitizer : ISanitizedNameProvider
+        {
+            public bool TrySanitizeIdentifier(Identifier identifier, out string sanitizedName, DottedNameNode dottedNameNode = null)
+            {
+                sanitizedName = dottedNameNode == null ? "custom" : "custom2";
+                return true;
+            }
+        }
+
+        [Theory]
+        [InlineData(
+            "Function(Field,1,\"foo\")",
+            "Function(custom, #$decimal$#, #$string$#)")]
+        [InlineData(
+            "Lookup.Field && true",
+            "custom.custom2 && #$boolean$#")]
+        public void TestStucturalPrintWithCustomSanitizer(string script, string expected)
+        {
+            var result = ParseScript(
+                script,
+                flags: Flags.EnableExpressionChaining);
+
+            Assert.Equal(expected, StructuralPrint.Print(result.Root, nameProvider: new TestSanitizer()));
         }
 
         [Theory]
@@ -42,7 +74,6 @@ namespace Microsoft.PowerFx.Tests
         [InlineData("RGBA(\n    255,\n    /*r   */255,   ", true)]
         public void TestSeverityLevelsForPrettyPrint(string script, bool expected)
         {
-            FeatureFlags.StringInterpolation = true;
             var result = ParseScript(
                 script,
                 flags: Flags.EnableExpressionChaining);
@@ -50,7 +81,7 @@ namespace Microsoft.PowerFx.Tests
             // Can't pretty print a script with errors.
             var hasErrorsWithSeverityHigherThanWarning = false;
 
-            if (result.Errors != null && result.Errors.Any(x => x.Severity > DocumentErrorSeverity.Warning))
+            if (result.Errors != null && result.Errors.Any(x => x.Severity > ErrorSeverity.Warning))
             {
                 hasErrorsWithSeverityHigherThanWarning = true;
             }
@@ -68,7 +99,7 @@ namespace Microsoft.PowerFx.Tests
         [InlineData("If(\n    Text(\n        Value(ThisItem.Expense)\n    )= \"0\",\n    \"$\",\n    Text(\n        Value(ThisItem.Expense),\n        \"$#,##\"\n    )\n)", "If(Text(Value(ThisItem.Expense))=\"0\",\"$\",Text(Value(ThisItem.Expense),\"$#,##\"))")]
         public void TestRemoveWhiteSpace(string script, string expected)
         {
-            var result = TexlLexer.LocalizedInstance.RemoveWhiteSpace(script);
+            var result = TexlLexer.InvariantLexer.RemoveWhiteSpace(script);
             Assert.NotNull(result);
             Assert.Equal(result, expected);
         }
@@ -124,17 +155,85 @@ namespace Microsoft.PowerFx.Tests
         [InlineData("/*a*/$\"Hello {\"World\"}\"", "/*a*/$\"Hello {\"World\"}\"")]
         [InlineData("$\"Hello {\"World\"/*b*/}\"", "$\"Hello {\"World\"/*b*/}\"")]
         [InlineData("$\"Hello {\"World\"}\"/*b*/", "$\"Hello {\"World\"}\"/*b*/")]
+        [InlineData("$\"{{}}\"", "$\"{{}}\"")]
+        [InlineData("This is not an interpolated {} {{{}}} string", "This is not an interpolated {} {{{}}} string")]
+        [InlineData("$\"{{{{1+1}}}}\"", "$\"{{{{1+1}}}}\"")]
+        [InlineData("Set(str, $\"{{}}\")", "Set(\n    str,\n    $\"{{}}\"\n)")]
+        [InlineData("Set(additionText, $\"The sum of 1 and 3 is {{{1 + 3}}})\")", "Set(\n    additionText,\n    $\"The sum of 1 and 3 is {{{1 + 3}}})\"\n)")]
+        [InlineData("$\"This is {{\"Another\"}} interpolated {{string}}\"", "$\"This is {{\"Another\"}} interpolated {{string}}\"")]
         public void TestPrettyPrint(string script, string expected)
         {
-            FeatureFlags.StringInterpolation = true;
+            // Act & Assert
             var result = Format(script);
             Assert.NotNull(result);
             Assert.Equal(expected, result);
 
-            // Ensure idempotence
+            // Act & Assert: Ensure idempotence
             result = Format(result);
             Assert.NotNull(result);
             Assert.Equal(expected, result);
+        }
+
+        [Theory]
+        [InlineData(TexlLexer.ReservedBlank)]
+        [InlineData(TexlLexer.ReservedChild)]
+        [InlineData(TexlLexer.ReservedChildren)]
+        [InlineData(TexlLexer.ReservedEmpty)]
+        [InlineData(TexlLexer.ReservedIs)]
+        [InlineData(TexlLexer.ReservedNone)]
+        [InlineData(TexlLexer.ReservedNothing)]
+        [InlineData(TexlLexer.ReservedNull)]
+        [InlineData(TexlLexer.ReservedSiblings)]
+        [InlineData(TexlLexer.ReservedThis)]
+        [InlineData(TexlLexer.ReservedUndefined)]
+        public void TestPrettyPrintWithDisabledReservedKeywordsFlag(string keyword)
+        {
+            // Arrange
+            var expression = $"Set({keyword}; true)";
+            var expectedFormattedExpr = $"Set(\n    {keyword};\n    true\n)";
+            var flags = Flags.DisableReservedKeywords | Flags.EnableExpressionChaining;
+
+            // Act
+            var result = Format(expression, flags);
+
+            // Asssert
+            Assert.NotNull(result);
+            Assert.Equal(expectedFormattedExpr, result);
+
+            // Act: Ensure idempotence
+            result = Format(result, flags);
+            
+            // Assert: Ensure idempotence
+            Assert.NotNull(result);
+            Assert.Equal(expectedFormattedExpr, result);
+        }
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(1)]
+        [InlineData(2)]
+        [InlineData(3)]
+        [InlineData(4)]
+        [InlineData(5)]
+        [InlineData(10)]
+        public void TestPrettyPrintAndRemoveWhitespaceRoundtripWithDisabledReservedKeywordsFlag(int trips)
+        {
+            // Arrange
+            var unformattedExpr = $"Set({TexlLexer.ReservedChildren}; true )";
+            var formatedExpr = $"Set(\n    {TexlLexer.ReservedChildren};\n    true\n)";
+            var expectedOutcome = trips % 2 == 0 ? unformattedExpr : formatedExpr;
+
+            // Act
+            var outcome = unformattedExpr;
+            for (var i = 1; i <= trips; ++i) 
+            {
+                outcome = i % 2 == 0 ?
+                          TexlLexer.InvariantLexer.RemoveWhiteSpace(outcome) :
+                          Format(outcome, Flags.DisableReservedKeywords | Flags.EnableExpressionChaining);
+            }
+
+            // Assert
+            Assert.Equal(expectedOutcome, outcome);
         }
     }
 }

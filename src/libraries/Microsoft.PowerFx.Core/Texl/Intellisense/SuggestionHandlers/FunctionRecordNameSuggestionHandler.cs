@@ -1,15 +1,14 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System.Linq;
 using Microsoft.PowerFx.Core.Binding.BindInfo;
 using Microsoft.PowerFx.Core.Functions;
-using Microsoft.PowerFx.Core.Lexer;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
-namespace Microsoft.PowerFx.Core.Texl.Intellisense
+namespace Microsoft.PowerFx.Intellisense
 {
     internal partial class Intellisense
     {
@@ -60,7 +59,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
                 if (func.CanSuggestInputColumns)
                 {
                     var aggregateType = GetAggregateType(func, callNode, intellisenseData);
-                    if (aggregateType.HasErrors || !aggregateType.IsAggregate)
+                    if (aggregateType.IsError || !aggregateType.IsAggregate)
                     {
                         return false;
                     }
@@ -75,7 +74,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
                         }
                     }
 
-                    foreach (var tName in aggregateType.GetNames(DPath.Root))
+                    foreach (var tName in aggregateType.GetNames(DPath.Root).Where(param => !param.Type.IsError))
                     {
                         var usedName = tName.Name;
                         if (DType.TryGetDisplayNameForColumn(aggregateType, usedName, out var maybeDisplayName))

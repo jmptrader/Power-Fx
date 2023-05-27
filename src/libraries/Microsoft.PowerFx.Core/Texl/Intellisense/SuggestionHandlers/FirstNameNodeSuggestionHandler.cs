@@ -3,14 +3,11 @@
 
 using System.Collections.Generic;
 using System.Linq;
-using Microsoft.PowerFx.Core.Lexer;
-using Microsoft.PowerFx.Core.Lexer.Tokens;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
-namespace Microsoft.PowerFx.Core.Texl.Intellisense
+namespace Microsoft.PowerFx.Intellisense
 {
     internal partial class Intellisense
     {
@@ -74,7 +71,8 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
 
                     intellisenseData.AddAdditionalSuggestionsForKeywordSymbols(curNode);
                 }
-                else if (IsBracketOpen(tok.Span.Lim, cursorPos, intellisenseData.Script))
+                else if (IsBracketOpen(tok.Span.Lim, cursorPos, intellisenseData.Script) && 
+                    !intellisenseData.Features.DisableRowScopeDisambiguationSyntax)
                 {
                     AddSuggestionsForScopeFields(intellisenseData, intellisenseData.Binding.GetType(firstNameNode));
                 }
@@ -95,7 +93,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
                 Contracts.AssertValue(intellisenseData);
 
                 var suggestions = intellisenseData.AdditionalGlobalSuggestions
-                    .Union(intellisenseData.EnumSymbols.Select(symbol => new KeyValuePair<string, SuggestionIconKind>(symbol.Name, SuggestionIconKind.Other)));
+                    .Union(intellisenseData.EnumSymbols.Select(symbol => new KeyValuePair<string, SuggestionIconKind>(symbol.EntityName.Value, SuggestionIconKind.Other)));
 
                 IntellisenseHelper.AddSuggestionsForMatches(intellisenseData, suggestions, SuggestionKind.Global, requiresSuggestionEscaping: true);
             }
@@ -116,7 +114,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
                 var bracketOpenCount = 0;
                 for (var i = begin; i < cursorPos; i++)
                 {
-                    if (TexlLexer.PunctuatorBracketOpen.Equals(script[i].ToString()))
+                    if (TexlLexer.PunctuatorBracketOpen.Equals(script[i].ToString(), System.StringComparison.Ordinal))
                     {
                         bracketOpenCount++;
                     }

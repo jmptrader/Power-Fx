@@ -1,43 +1,91 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System;
 using System.Collections.Generic;
-using System.Diagnostics.Contracts;
 using System.Globalization;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.PowerFx.Core.Entities;
+using Microsoft.PowerFx.Core.Functions;
 using Microsoft.PowerFx.Core.IR;
 using Microsoft.PowerFx.Core.IR.Nodes;
 using Microsoft.PowerFx.Core.IR.Symbols;
-using Microsoft.PowerFx.Core.Public;
-using Microsoft.PowerFx.Core.Public.Types;
-using Microsoft.PowerFx.Core.Public.Values;
 using Microsoft.PowerFx.Functions;
+using Microsoft.PowerFx.Interpreter;
+using Microsoft.PowerFx.Interpreter.Exceptions;
+using Microsoft.PowerFx.Types;
 using static Microsoft.PowerFx.Functions.Library;
 
 namespace Microsoft.PowerFx
 {
-    internal class EvalVisitor : IRNodeVisitor<FormulaValue, SymbolContext>
+    // This used ValueTask for async, https://devblogs.microsoft.com/dotnet/understanding-the-whys-whats-and-whens-of-valuetask/ 
+    // Perf comparison of Task vs. ValueTask: https://ladeak.wordpress.com/2019/03/09/valuetask-vs-task 
+    // Use Task for public methods, but ValueTask for internal methods that we expect to be mostly sync. 
+    internal class EvalVisitor : IRNodeVisitor<ValueTask<FormulaValue>, EvalVisitorContext>
     {
-        public CultureInfo CultureInfo { get; }
+        private readonly ReadOnlySymbolValues _symbolValues;
 
-        public EvalVisitor(CultureInfo cultureInfo)
+        private readonly CancellationToken _cancellationToken;
+
+        internal CancellationToken CancellationToken => _cancellationToken;
+
+        private readonly IServiceProvider _services;
+
+        public IServiceProvider FunctionServices => _services;
+
+        public CultureInfo CultureInfo { get; private set; }
+
+        public TimeZoneInfo TimeZoneInfo { get; private set; }
+
+        public DateTimeKind DateTimeKind => TimeZoneInfo.BaseUtcOffset == TimeSpan.Zero ? DateTimeKind.Utc : DateTimeKind.Unspecified;
+
+        public Governor Governor { get; private set; }
+
+        public EvalVisitor(IRuntimeConfig config, CancellationToken cancellationToken)
         {
-            CultureInfo = cultureInfo;
+            _symbolValues = config.Values; // may be null 
+            _cancellationToken = cancellationToken;
+            _services = config.ServiceProvider ?? new BasicServiceProvider();
+
+            TimeZoneInfo = GetService<TimeZoneInfo>() ?? TimeZoneInfo.Local;
+            Governor = GetService<Governor>() ?? new Governor();
+            CultureInfo = GetService<CultureInfo>();
+        }
+
+        /// <summary>
+        /// Get a service from the <see cref="ReadOnlySymbolValues"/>. Returns null if not present.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <returns></returns>
+        public T GetService<T>()
+        {
+            return (T)_services.GetService(typeof(T));
+        }
+
+        public bool TryGetService<T>(out T result)
+        {
+            result = GetService<T>();
+            return result != null;
+        }
+
+        // Check this cooperatively - especially in any loop. 
+        public void CheckCancel()
+        {
+            // Throws OperationCanceledException exception
+            _cancellationToken.ThrowIfCancellationRequested();
+
+            Governor.Poll();
         }
 
         // Helper to eval an arg that might be a lambda.
-        internal DValue<T> EvalArg<T>(FormulaValue arg, SymbolContext context, IRContext irContext)
+        internal async ValueTask<DValue<T>> EvalArgAsync<T>(FormulaValue arg, EvalVisitorContext context, IRContext irContext)
             where T : ValidFormulaValue
         {
             if (arg is LambdaFormulaValue lambda)
             {
-                var val = lambda.Eval(this, context);
-                return val switch
-                {
-                    T t => DValue<T>.Of(t),
-                    BlankValue b => DValue<T>.Of(b),
-                    ErrorValue e => DValue<T>.Of(e),
-                    _ => DValue<T>.Of(CommonErrors.RuntimeTypeMismatch(irContext))
-                };
+                arg = await lambda.EvalInRowScopeAsync(context).ConfigureAwait(false);
             }
 
             return arg switch
@@ -49,68 +97,133 @@ namespace Microsoft.PowerFx
             };
         }
 
-        public override FormulaValue Visit(TextLiteralNode node, SymbolContext context)
+        public override async ValueTask<FormulaValue> Visit(TextLiteralNode node, EvalVisitorContext context)
         {
             return new StringValue(node.IRContext, node.LiteralValue);
         }
 
-        public override FormulaValue Visit(NumberLiteralNode node, SymbolContext context)
+        public override async ValueTask<FormulaValue> Visit(NumberLiteralNode node, EvalVisitorContext context)
         {
             return new NumberValue(node.IRContext, node.LiteralValue);
         }
 
-        public override FormulaValue Visit(BooleanLiteralNode node, SymbolContext context)
+        public override async ValueTask<FormulaValue> Visit(DecimalLiteralNode node, EvalVisitorContext context)
+        {
+            return new DecimalValue(node.IRContext, node.LiteralValue);
+        }
+
+        public override async ValueTask<FormulaValue> Visit(BooleanLiteralNode node, EvalVisitorContext context)
         {
             return new BooleanValue(node.IRContext, node.LiteralValue);
         }
 
-        public override FormulaValue Visit(TableNode node, SymbolContext context)
+        public override async ValueTask<FormulaValue> Visit(ColorLiteralNode node, EvalVisitorContext context)
         {
-            // single-column table.
-
-            var len = node.Values.Count;
-
-            // Were pushed left-to-right
-            var args = new FormulaValue[len];
-            for (var i = 0; i < len; i++)
-            {
-                var child = node.Values[i];
-                var arg = child.Accept(this, context);
-                args[i] = arg;
-            }
-
-            // Children are on the stack.
-            var tableValue = new InMemoryTableValue(node.IRContext, StandardTableNodeRecords(node.IRContext, args));
-
-            return tableValue;
+            return new ColorValue(node.IRContext, node.LiteralValue);
         }
 
-        public override FormulaValue Visit(RecordNode node, SymbolContext context)
+        public override async ValueTask<FormulaValue> Visit(RecordNode node, EvalVisitorContext context)
         {
             var fields = new List<NamedValue>();
 
             foreach (var field in node.Fields)
             {
+                CheckCancel();
+
                 var name = field.Key;
                 var value = field.Value;
 
-                var rhsValue = value.Accept(this, context);
+                var rhsValue = await value.Accept(this, context).ConfigureAwait(false);
                 fields.Add(new NamedValue(name.Value, rhsValue));
             }
 
             return new InMemoryRecordValue(node.IRContext, fields);
         }
 
-        public override FormulaValue Visit(LazyEvalNode node, SymbolContext context)
+        public override async ValueTask<FormulaValue> Visit(LazyEvalNode node, EvalVisitorContext context)
         {
-            var val = node.Child.Accept(this, context);
+            var val = await node.Child.Accept(this, context).ConfigureAwait(false);
             return val;
         }
 
-        public override FormulaValue Visit(CallNode node, SymbolContext context)
+        // Handle the Set() function -
+        // Set is unique because it has an l-value for the first arg. 
+        // Async params can't have out-params. 
+        // Return null if not handled. Else non-null if handled.
+        private async Task<FormulaValue> TryHandleSet(CallNode node, EvalVisitorContext context)
         {
-            // Sum(  [1,2,3], Value * Value)
-            // return base.PreVisit(node);
+            // Special case Set() calls because they take an LValue. 
+            if (node.Function.GetType() != typeof(RecalcEngineSetFunction))
+            {
+                return null;
+            }
+
+            var arg0 = node.Args[0];
+            var arg1 = node.Args[1];
+
+            var newValue = await arg1.Accept(this, context).ConfigureAwait(false);
+
+            // Binder has already ensured this is a first name node as well as mutable symbol. 
+            if (arg0 is ResolvedObjectNode obj)
+            {
+                if (obj.Value is ISymbolSlot sym)
+                {
+                    if (_symbolValues != null)
+                    {
+                        _symbolValues.Set(sym, newValue);
+                        return FormulaValue.New(true);
+                    }
+
+                    // This may happen if the runtime symbols are missing a value and we failed to update. 
+                }
+            }
+
+            // Fail?
+            return CommonErrors.UnreachableCodeError(node.IRContext);
+        }
+
+        // Handle invoke SetProperty(source.Prop, newValue)
+        // Invoke as: SetProperty(source, "Prop", newValue)
+        private async Task<FormulaValue> TryHandleSetProperty(CallNode node, EvalVisitorContext context)
+        {
+            if (node.Function is not CustomSetPropertyFunction setPropFunc)
+            {
+                return null;
+            }
+
+            var arg0 = node.Args[0];
+            var arg1 = node.Args[1];
+
+            if (arg0 is not RecordFieldAccessNode r)
+            {
+                return null;
+            }
+
+            var source = await r.From.Accept(this, context).ConfigureAwait(false);
+            var fieldName = r.Field.Value;
+            var newValue = await arg1.Accept(this, context).ConfigureAwait(false);
+
+            var args = new FormulaValue[] { source, FormulaValue.New(fieldName), newValue };
+            var result = await setPropFunc.InvokeAsync(args, _cancellationToken).ConfigureAwait(false);
+
+            return result;
+        }
+
+        public override async ValueTask<FormulaValue> Visit(CallNode node, EvalVisitorContext context)
+        {
+            CheckCancel();
+
+            var setResult = await TryHandleSet(node, context.IncrementStackDepthCounter()).ConfigureAwait(false);
+            if (setResult != null)
+            {
+                return setResult;
+            }
+
+            var setPropResult = await TryHandleSetProperty(node, context.IncrementStackDepthCounter()).ConfigureAwait(false);
+            if (setPropResult != null)
+            {
+                return setPropResult;
+            }
 
             var func = node.Function;
 
@@ -120,55 +233,101 @@ namespace Microsoft.PowerFx
 
             for (var i = 0; i < carg; i++)
             {
+                CheckCancel();
+
                 var child = node.Args[i];
                 var isLambda = node.IsLambdaArg(i);
 
                 if (!isLambda)
                 {
-                    args[i] = child.Accept(this, context);
+                    args[i] = await child.Accept(this, context.IncrementStackDepthCounter()).ConfigureAwait(false);
                 }
                 else
                 {
-                    args[i] = new LambdaFormulaValue(node.IRContext, child);
+                    args[i] = new LambdaFormulaValue(node.IRContext, child, this, context);
                 }
             }
 
-            var childContext = context.WithScope(node.Scope);
+            var childContext = context.SymbolContext.WithScope(node.Scope);
 
-            if (func is CustomTexlFunction customFunc)
+            FormulaValue result;
+            IReadOnlyDictionary<TexlFunction, IAsyncTexlFunction> extraFunctions = _services.GetService<IReadOnlyDictionary<TexlFunction, IAsyncTexlFunction>>();
+
+            if (func is IAsyncTexlFunction asyncFunc || extraFunctions?.TryGetValue(func, out asyncFunc) == true)
             {
-                var result = customFunc.Invoke(args);
-                return result;
+                result = await asyncFunc.InvokeAsync(args, _cancellationToken).ConfigureAwait(false);
+            }
+            else if (func is UserDefinedTexlFunction udtf)
+            {
+                // $$$ Should add _runtimeConfig
+                result = await udtf.InvokeAsync(args, _cancellationToken, context.StackDepthCounter.Increment()).ConfigureAwait(false);
+            }
+            else if (func is CustomTexlFunction customTexlFunc)
+            {
+                // If custom function throws an exception, don't catch it - let it propagate up to the host.
+                result = await customTexlFunc.InvokeAsync(FunctionServices, args, _cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                if (FuncsByName.TryGetValue(func, out var ptr))
+                if (FunctionImplementations.TryGetValue(func, out AsyncFunctionPtr ptr))
                 {
-                    var result = ptr(this, childContext, node.IRContext, args);
+                    try
+                    {
+                        result = await ptr(this, context.IncrementStackDepthCounter(childContext), node.IRContext, args).ConfigureAwait(false);
+                    }
+                    catch (CustomFunctionErrorException ex)
+                    {
+                        var irContext = node.IRContext;
+                        result = new ErrorValue(
+                            irContext,
+                            new ExpressionError()
+                            {
+                                Message = ex.Message,
+                                Span = irContext.SourceContext,
+                                Kind = ex.ErrorKind
+                            });
+                    }
 
-                    Contract.Assert(result.IRContext.ResultType == node.IRContext.ResultType || result is ErrorValue || result.IRContext.ResultType is BlankType);
-
-                    return result;
+                    if (!(result.IRContext.ResultType._type == node.IRContext.ResultType._type || result is ErrorValue || result.IRContext.ResultType is BlankType))
+                    {
+                        throw CommonExceptions.RuntimeMisMatch;
+                    }
                 }
-
-                return CommonErrors.NotYetImplementedError(node.IRContext, $"Missing func: {func.Name}");
+                else
+                {
+                    result = CommonErrors.NotYetImplementedError(node.IRContext, $"Missing func: {func.Name}");
+                }
             }
+
+            CheckCancel();
+            return result;
         }
 
-        public override FormulaValue Visit(BinaryOpNode node, SymbolContext context)
+        public override async ValueTask<FormulaValue> Visit(BinaryOpNode node, EvalVisitorContext context)
         {
-            var arg1 = node.Left.Accept(this, context);
-            var arg2 = node.Right.Accept(this, context);
+            var arg1 = await node.Left.Accept(this, context).ConfigureAwait(false);
+            var arg2 = await node.Right.Accept(this, context).ConfigureAwait(false);
             var args = new FormulaValue[] { arg1, arg2 };
+            return await VisitBinaryOpNode(node, context, args).ConfigureAwait(false);
+        }
 
+        private ValueTask<FormulaValue> VisitBinaryOpNode(BinaryOpNode node, EvalVisitorContext context, FormulaValue[] args)
+        {
             switch (node.Op)
             {
                 case BinaryOpKind.AddNumbers:
                     return OperatorBinaryAdd(this, context, node.IRContext, args);
+                case BinaryOpKind.AddDecimals:
+                    return OperatorDecimalBinaryAdd(this, context, node.IRContext, args);
                 case BinaryOpKind.MulNumbers:
                     return OperatorBinaryMul(this, context, node.IRContext, args);
+                case BinaryOpKind.MulDecimals:
+                    return OperatorDecimalBinaryMul(this, context, node.IRContext, args);
                 case BinaryOpKind.DivNumbers:
                     return OperatorBinaryDiv(this, context, node.IRContext, args);
+                case BinaryOpKind.DivDecimals:
+                    return OperatorDecimalBinaryDiv(this, context, node.IRContext, args);
+
                 case BinaryOpKind.EqBlob:
 
                 case BinaryOpKind.EqBoolean:
@@ -184,8 +343,13 @@ namespace Microsoft.PowerFx
                 case BinaryOpKind.EqOptionSetValue:
                 case BinaryOpKind.EqText:
                 case BinaryOpKind.EqTime:
+                case BinaryOpKind.EqNull:
+                case BinaryOpKind.EqDecimals:
                     return OperatorBinaryEq(this, context, node.IRContext, args);
-
+                case BinaryOpKind.EqNullUntyped:
+                    return OperatorBinaryEqNullUntyped(this, context, node.IRContext, args);
+                case BinaryOpKind.EqPolymorphic:
+                    return OperatorBinaryEqPolymorphic(this, context, node.IRContext, args);
                 case BinaryOpKind.NeqBlob:
                 case BinaryOpKind.NeqBoolean:
                 case BinaryOpKind.NeqColor:
@@ -200,16 +364,35 @@ namespace Microsoft.PowerFx
                 case BinaryOpKind.NeqOptionSetValue:
                 case BinaryOpKind.NeqText:
                 case BinaryOpKind.NeqTime:
+                case BinaryOpKind.NeqNull:
+                case BinaryOpKind.NeqDecimals:
                     return OperatorBinaryNeq(this, context, node.IRContext, args);
+                case BinaryOpKind.NeqNullUntyped:
+                    return OperatorBinaryNeqNullUntyped(this, context, node.IRContext, args);
+                case BinaryOpKind.NeqPolymorphic:
+                    return OperatorBinaryNeqPolymorphic(this, context, node.IRContext, args);
 
                 case BinaryOpKind.GtNumbers:
+                case BinaryOpKind.GtNull:
                     return OperatorBinaryGt(this, context, node.IRContext, args);
                 case BinaryOpKind.GeqNumbers:
+                case BinaryOpKind.GeqNull:
                     return OperatorBinaryGeq(this, context, node.IRContext, args);
                 case BinaryOpKind.LtNumbers:
+                case BinaryOpKind.LtNull:
                     return OperatorBinaryLt(this, context, node.IRContext, args);
                 case BinaryOpKind.LeqNumbers:
+                case BinaryOpKind.LeqNull:
                     return OperatorBinaryLeq(this, context, node.IRContext, args);
+
+                case BinaryOpKind.GtDecimals:
+                    return OperatorDecimalBinaryGt(this, context, node.IRContext, args);
+                case BinaryOpKind.GeqDecimals:
+                    return OperatorDecimalBinaryGeq(this, context, node.IRContext, args);
+                case BinaryOpKind.LtDecimals:
+                    return OperatorDecimalBinaryLt(this, context, node.IRContext, args);
+                case BinaryOpKind.LeqDecimals:
+                    return OperatorDecimalBinaryLeq(this, context, node.IRContext, args);
 
                 case BinaryOpKind.InText:
                     return OperatorTextIn(this, context, node.IRContext, args);
@@ -228,10 +411,22 @@ namespace Microsoft.PowerFx
                     return OperatorAddDateAndDay(this, context, node.IRContext, args);
                 case BinaryOpKind.AddDateTimeAndDay:
                     return OperatorAddDateTimeAndDay(this, context, node.IRContext, args);
+                case BinaryOpKind.AddTimeAndNumber:
+                    return OperatorAddTimeAndNumber(this, context, node.IRContext, args);
+                case BinaryOpKind.AddNumberAndTime:
+                    return OperatorAddTimeAndNumber(this, context, node.IRContext, new[] { args[1], args[0] });
+                case BinaryOpKind.AddTimeAndTime:
+                    return OperatorAddTimeAndTime(this, context, node.IRContext, args);
                 case BinaryOpKind.DateDifference:
                     return OperatorDateDifference(this, context, node.IRContext, args);
                 case BinaryOpKind.TimeDifference:
                     return OperatorTimeDifference(this, context, node.IRContext, args);
+                case BinaryOpKind.SubtractDateAndTime:
+                    return OperatorSubtractDateAndTime(this, context, node.IRContext, args);
+                case BinaryOpKind.SubtractNumberAndDate:
+                    return OperatorSubtractNumberAndDate(this, context, node.IRContext, args);
+                case BinaryOpKind.SubtractNumberAndTime:
+                    return OperatorSubtractNumberAndTime(this, context, node.IRContext, args);
                 case BinaryOpKind.LtDateTime:
                     return OperatorLtDateTime(this, context, node.IRContext, args);
                 case BinaryOpKind.LeqDateTime:
@@ -257,72 +452,85 @@ namespace Microsoft.PowerFx
                 case BinaryOpKind.GeqTime:
                     return OperatorGeqTime(this, context, node.IRContext, args);
                 case BinaryOpKind.DynamicGetField:
-                    if (arg1 is UntypedObjectValue cov && arg2 is StringValue sv)
-                    {
-                        if (cov.Impl.Type is ExternalType et && et.Kind == ExternalTypeKind.Object)
-                        {
-                            if (cov.Impl.TryGetProperty(sv.Value, out var res))
-                            {
-                                if (res.Type == FormulaType.Blank)
-                                {
-                                    return new BlankValue(node.IRContext);
-                                }
-
-                                return new UntypedObjectValue(node.IRContext, res);
-                            }
-                            else
-                            {
-                                return new BlankValue(node.IRContext);
-                            }
-                        }
-                        else if (cov.Impl.Type == FormulaType.Blank)
-                        {
-                            return new BlankValue(node.IRContext);
-                        }
-                        else
-                        {
-                            return new ErrorValue(node.IRContext, new ExpressionError()
-                            {
-                                Message = "Accessing a field is not valid on this value",
-                                Span = node.IRContext.SourceContext,
-                                Kind = ErrorKind.BadLanguageCode
-                            });
-                        }
-                    }
-                    else if (arg1 is BlankValue)
-                    {
-                        return new BlankValue(node.IRContext);
-                    }
-                    else if (arg1 is ErrorValue)
-                    {
-                        return arg1;
-                    }
-                    else
-                    {
-                        return CommonErrors.UnreachableCodeError(node.IRContext);
-                    }
+                    return new ValueTask<FormulaValue>(OperatorDynamicGetField(node, args));
 
                 default:
-                    return CommonErrors.UnreachableCodeError(node.IRContext);
+                    return new ValueTask<FormulaValue>(CommonErrors.UnreachableCodeError(node.IRContext));
             }
         }
 
-        public override FormulaValue Visit(UnaryOpNode node, SymbolContext context)
+        private static FormulaValue OperatorDynamicGetField(BinaryOpNode node, FormulaValue[] args)
         {
-            var arg1 = node.Child.Accept(this, context);
+            var arg1 = args[0];
+            var arg2 = args[1];
+
+            if (arg1 is UntypedObjectValue cov && arg2 is StringValue sv)
+            {
+                if (cov.Impl.Type is ExternalType et && (et.Kind == ExternalTypeKind.Object || et.Kind == ExternalTypeKind.ArrayAndObject))
+                {
+                    if (cov.Impl.TryGetProperty(sv.Value, out var res))
+                    {
+                        if (res.Type == FormulaType.Blank)
+                        {
+                            return new BlankValue(node.IRContext);
+                        }
+
+                        return new UntypedObjectValue(node.IRContext, res);
+                    }
+                    else
+                    {
+                        return new BlankValue(node.IRContext);
+                    }
+                }
+                else if (cov.Impl.Type == FormulaType.Blank)
+                {
+                    return new BlankValue(node.IRContext);
+                }
+                else
+                {
+                    return new ErrorValue(node.IRContext, new ExpressionError()
+                    {
+                        Message = "Accessing a field is not valid on this value",
+                        Span = node.IRContext.SourceContext,
+                        Kind = ErrorKind.InvalidArgument
+                    });
+                }
+            }
+            else if (arg1 is BlankValue)
+            {
+                return new BlankValue(node.IRContext);
+            }
+            else if (arg1 is ErrorValue)
+            {
+                return arg1;
+            }
+            else
+            {
+                return CommonErrors.UnreachableCodeError(node.IRContext);
+            }
+        }
+
+        public override async ValueTask<FormulaValue> Visit(UnaryOpNode node, EvalVisitorContext context)
+        {
+            var arg1 = await node.Child.Accept(this, context).ConfigureAwait(false);
             var args = new FormulaValue[] { arg1 };
 
             if (UnaryOps.TryGetValue(node.Op, out var unaryOp))
             {
-                return unaryOp(this, context, node.IRContext, args);
+                return await unaryOp(this, context, node.IRContext, args).ConfigureAwait(false);
             }
 
-            return CommonErrors.UnreachableCodeError(node.IRContext);
+            return CommonErrors.NotYetImplementedError(node.IRContext, $"Unary op {node.Op}");
         }
 
-        public override FormulaValue Visit(AggregateCoercionNode node, SymbolContext context)
+        public override async ValueTask<FormulaValue> Visit(AggregateCoercionNode node, EvalVisitorContext context)
         {
-            var arg1 = node.Child.Accept(this, context);
+            var arg1 = await node.Child.Accept(this, context).ConfigureAwait(false);
+
+            if (arg1 is BlankValue || arg1 is ErrorValue)
+            {
+                return arg1;
+            }
 
             if (node.Op == UnaryOpKind.TableToTable)
             {
@@ -331,18 +539,29 @@ namespace Microsoft.PowerFx
                 var resultRows = new List<DValue<RecordValue>>();
                 foreach (var row in table.Rows)
                 {
+                    CheckCancel();
+
                     if (row.IsValue)
                     {
                         var fields = new List<NamedValue>();
-                        var scopeContext = context.WithScope(node.Scope);
-                        foreach (var coercion in node.FieldCoercions)
-                        {
-                            var record = row.Value;
-                            var newScope = scopeContext.WithScopeValues(record);
+                        var scopeContext = context.SymbolContext.WithScope(node.Scope);
 
-                            var newValue = coercion.Value.Accept(this, newScope);
-                            var name = coercion.Key;
-                            fields.Add(new NamedValue(name.Value, newValue));
+                        foreach (var field in row.Value.Fields)
+                        {
+                            CheckCancel();
+
+                            if (node.FieldCoercions.TryGetValue(new Core.Utils.DName(field.Name), out var coercion))
+                            {
+                                var record = row.Value;
+                                var newScope = scopeContext.WithScopeValues(record);
+                                var newValue = await coercion.Accept(this, context.NewScope(newScope)).ConfigureAwait(false);
+
+                                fields.Add(new NamedValue(field.Name, newValue));
+                            }
+                            else
+                            {
+                                fields.Add(field);
+                            }
                         }
 
                         resultRows.Add(DValue<RecordValue>.Of(new InMemoryRecordValue(IRContext.NotInSource(tableType.ToRecord()), fields)));
@@ -359,34 +578,60 @@ namespace Microsoft.PowerFx
 
                 return new InMemoryTableValue(node.IRContext, resultRows);
             }
+            else if (node.Op == UnaryOpKind.RecordToRecord)
+            {
+                var fields = new List<NamedValue>();
+
+                var scopeContext = context.SymbolContext.WithScope(node.Scope);
+                var newScope = scopeContext.WithScopeValues((RecordValue)arg1);
+
+                var recordSrc = (RecordValue)arg1;
+                foreach (var f2 in recordSrc.Fields)
+                {
+                    CheckCancel();
+
+                    if (node.FieldCoercions.TryGetValue(new Core.Utils.DName(f2.Name), out var coercion))
+                    {
+                        var newValue = await coercion.Accept(this, context.NewScope(newScope)).ConfigureAwait(false);
+
+                        fields.Add(new NamedValue(f2.Name, newValue));
+                    }
+                    else
+                    {
+                        // Existing field, no coercion needed. 
+                        fields.Add(f2);
+                    }
+                }
+
+                return FormulaValue.NewRecordFromFields(fields);
+            }
 
             return CommonErrors.UnreachableCodeError(node.IRContext);
         }
 
-        public override FormulaValue Visit(ScopeAccessNode node, SymbolContext context)
+        public override async ValueTask<FormulaValue> Visit(ScopeAccessNode node, EvalVisitorContext context)
         {
             if (node.Value is ScopeAccessSymbol s1)
             {
                 var scope = s1.Parent;
 
-                var val = context.GetScopeVar(scope, s1.Name);
+                var val = context.SymbolContext.GetScopeVar(scope, s1.Name);
                 return val;
             }
 
             // Binds to whole scope
             if (node.Value is ScopeSymbol s2)
             {
-                var r = context.ScopeValues[s2.Id];
-                var r2 = (RecordScope)r;
-                return r2._context;
+                var r = context.SymbolContext.ScopeValues[s2.Id];
+                return r.Resolve(string.Empty);
             }
 
             return CommonErrors.UnreachableCodeError(node.IRContext);
         }
 
-        public override FormulaValue Visit(RecordFieldAccessNode node, SymbolContext context)
+        public override async ValueTask<FormulaValue> Visit(RecordFieldAccessNode node, EvalVisitorContext context)
         {
-            var left = node.From.Accept(this, context);
+            var left = await node.From.Accept(this, context).ConfigureAwait(false);
 
             if (left is BlankValue)
             {
@@ -399,17 +644,17 @@ namespace Microsoft.PowerFx
             }
 
             var record = (RecordValue)left;
-            var val = record.GetField(node.IRContext, node.Field.Value);
+            var val = await record.GetFieldAsync(node.IRContext.ResultType, node.Field.Value, _cancellationToken).ConfigureAwait(false);
 
             return val;
         }
 
-        public override FormulaValue Visit(SingleColumnTableAccessNode node, SymbolContext context)
+        public override async ValueTask<FormulaValue> Visit(SingleColumnTableAccessNode node, EvalVisitorContext context)
         {
             return CommonErrors.NotYetImplementedError(node.IRContext, "Single column table access");
         }
 
-        public override FormulaValue Visit(ErrorNode node, SymbolContext context)
+        public override async ValueTask<FormulaValue> Visit(ErrorNode node, EvalVisitorContext context)
         {
             return new ErrorValue(node.IRContext, new ExpressionError()
             {
@@ -419,24 +664,123 @@ namespace Microsoft.PowerFx
             });
         }
 
-        public override FormulaValue Visit(ColorLiteralNode node, SymbolContext context)
+        public override async ValueTask<FormulaValue> Visit(ChainingNode node, EvalVisitorContext context)
         {
-            return CommonErrors.NotYetImplementedError(node.IRContext, "Color literal");
-        }
+            CheckCancel();
 
-        public override FormulaValue Visit(ChainingNode node, SymbolContext context)
-        {
-            return CommonErrors.NotYetImplementedError(node.IRContext, "Expression chaining");
-        }
-
-        public override FormulaValue Visit(ResolvedObjectNode node, SymbolContext context)
-        {
-            return node.Value switch
+            if (!node.Nodes.Any())
             {
-                RecalcFormulaInfo fi => ResolvedObjectHelpers.RecalcFormulaInfo(fi),
-                OptionSet optionSet => ResolvedObjectHelpers.OptionSet(optionSet, node.IRContext),
-                _ => ResolvedObjectHelpers.ResolvedObjectError(node),
-            };
+                return CommonErrors.InvalidChain(node.IRContext, node.ToString());
+            }
+
+            FormulaValue fv = null;
+            var errors = new List<ExpressionError>();
+
+            foreach (var iNode in node.Nodes)
+            {
+                CheckCancel();
+
+                fv = await iNode.Accept(this, context).ConfigureAwait(false);
+
+                if (fv is ErrorValue ev)
+                {
+                    errors.AddRange(ev.Errors);
+                }
+            }
+
+            return errors.Any() ? new ErrorValue(node.IRContext, errors) : fv;
+        }
+
+        public override async ValueTask<FormulaValue> Visit(ResolvedObjectNode node, EvalVisitorContext context)
+        {
+            switch (node.Value)
+            {
+                case NameSymbol name:
+                    return GetVariableOrFail(node, name);
+                case FormulaValue fi:
+                    return fi;
+                case IExternalOptionSet optionSet:
+                    return ResolvedObjectHelpers.OptionSet(optionSet, node.IRContext);
+                case Func<IServiceProvider, Task<FormulaValue>> getHostObject:
+                    FormulaValue hostObj;
+                    try
+                    {
+                        hostObj = await getHostObject(_services).ConfigureAwait(false);
+                        if (!hostObj.Type._type.Accepts(node.IRContext.ResultType._type, exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: true))
+                        {
+                            hostObj = CommonErrors.RuntimeTypeMismatch(node.IRContext);
+                        }
+                    }
+                    catch (CustomFunctionErrorException ex)
+                    {
+                        hostObj = CommonErrors.CustomError(node.IRContext, ex.Message);
+                    }
+
+                    return hostObj;
+                default:
+                    return ResolvedObjectHelpers.ResolvedObjectError(node);
+            }
+        }
+
+        private FormulaValue GetVariableOrFail(ResolvedObjectNode node, ISymbolSlot slot)
+        {
+            if (_symbolValues != null)
+            {
+                var value = _symbolValues.Get(slot);
+                if (value != null)
+                {
+                    return value;
+                }
+            }
+
+            return ResolvedObjectHelpers.ResolvedObjectError(node);
+        }
+
+        public DateTime GetNormalizedDateTime(FormulaValue arg)
+        {
+            return GetNormalizedDateTimeLibrary(arg, TimeZoneInfo);
+        }
+
+        public DateTime GetNormalizedDateTimeAllowTimeValue(FormulaValue arg)
+        {
+            switch (arg)
+            {
+                case DateTimeValue dtv:
+                    return dtv.GetConvertedValue(TimeZoneInfo);
+                case DateValue dv:
+                    return dv.GetConvertedValue(TimeZoneInfo);
+                case TimeValue tv:
+                    return _epoch.Add(tv.Value);
+                default:
+                    throw CommonExceptions.RuntimeMisMatch;
+            }
+        }
+
+        public TimeSpan GetNormalizedTimeSpan(FormulaValue arg)
+        {
+            switch (arg)
+            {
+                case DateTimeValue dtv:
+                    return dtv.GetConvertedValue(TimeZoneInfo).TimeOfDay;
+                case TimeValue dv:
+                    return dv.Value;
+                default:
+                    throw CommonExceptions.RuntimeMisMatch;
+            }
+        }
+
+        public TimeSpan GetNormalizedTimeSpanWithoutDay(FormulaValue arg)
+        {
+            switch (arg)
+            {
+                case DateTimeValue dtv:
+                    var dtvValue = dtv.GetConvertedValue(TimeZoneInfo);
+                    return new TimeSpan(0, dtvValue.Hour, dtvValue.Minute, dtvValue.Second, dtvValue.Millisecond);
+                case TimeValue tv:
+                    return tv.Value;
+                default:
+                    throw CommonExceptions.RuntimeMisMatch;
+            }
         }
     }
 }

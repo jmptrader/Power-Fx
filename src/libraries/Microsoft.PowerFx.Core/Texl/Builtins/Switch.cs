@@ -10,9 +10,9 @@ using Microsoft.PowerFx.Core.Errors;
 using Microsoft.PowerFx.Core.Functions;
 using Microsoft.PowerFx.Core.Functions.FunctionArgValidators;
 using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
 namespace Microsoft.PowerFx.Core.Texl.Builtins
 {
@@ -26,10 +26,6 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
     internal sealed class SwitchFunction : BuiltinFunction
     {
         public override bool IsSelfContained => true;
-
-        // Note, switch has a very custom checkinvocation implementation
-        // We do not support coercion for the 1st param, or the match params, only the result params. 
-        public override bool SupportsParamCoercion => true;
 
         public SwitchFunction()
             : base("Switch", TexlStrings.AboutSwitch, FunctionCategories.Logical, DType.Unknown, 0, 3, int.MaxValue)
@@ -83,9 +79,9 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
         // Type check an invocation of the function with the specified args (and their corresponding types).
         // Return true if everything aligns, false otherwise.
         // This override does not post any document errors (i.e. it performs the typechecks quietly).
-        public override bool CheckInvocation(TexlBinding binding, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
+        public override bool CheckTypes(CheckTypesContext context, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
         {
-            Contracts.AssertValue(binding);
+            Contracts.AssertValue(context);
             Contracts.AssertValue(args);
             Contracts.AssertAllValues(args);
             Contracts.AssertValue(argTypes);
@@ -99,14 +95,15 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             var fArgsValid = true;
             for (var i = 1; i < count - 1; i += 2)
             {
-                if (!argTypes[0].Accepts(argTypes[i]) && !argTypes[i].Accepts(argTypes[0]))
+                if (!argTypes[0].Accepts(argTypes[i], exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: context.Features.PowerFxV1CompatibilityRules) &&
+                    !argTypes[i].Accepts(argTypes[0], exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: context.Features.PowerFxV1CompatibilityRules))
                 {
                     // Type mismatch; using CheckType to fill the errors collection
-                    var validExpectedType = CheckType(args[i], argTypes[i], argTypes[0], errors, coerceIfSupported: false, out bool _);
+                    var validExpectedType = CheckType(context, args[i], argTypes[i], argTypes[0], errors, coerceIfSupported: false, out bool _);
                     if (validExpectedType)
                     {
                         // Check on the opposite direction
-                        validExpectedType = CheckType(args[0], argTypes[0], argTypes[i], errors, coerceIfSupported: false, out bool _);
+                        validExpectedType = CheckType(context, args[0], argTypes[0], argTypes[i], errors, coerceIfSupported: false, out bool _);
                     }
 
                     fArgsValid &= validExpectedType;
@@ -116,59 +113,34 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             var type = ReturnType;
             nodeToCoercedTypeMap = null;
 
-            // Are we on a behavior property?
-            var isBehavior = binding.IsBehavior;
-
             // Compute the result type by joining the types of all non-predicate args.
             Contracts.Assert(type == DType.Unknown);
+
+            var possibleResults = new List<(TexlNode node, DType type)>();
             for (var i = 2; i < count;)
             {
-                var nodeArg = args[i];
-                var typeArg = argTypes[i];
-                if (typeArg.IsError)
-                {
-                    errors.EnsureError(args[i], TexlStrings.ErrTypeError);
-                }
-
-                var typeSuper = DType.Supertype(type, typeArg);
-
-                if (!typeSuper.IsError)
-                {
-                    type = typeSuper;
-                }
-                else if (type.Kind == DKind.Unknown)
-                {
-                    type = typeSuper;
-                    fArgsValid = false;
-                }
-                else if (!type.IsError)
-                {
-                    if (typeArg.CoercesTo(type))
-                    {
-                        CollectionUtils.Add(ref nodeToCoercedTypeMap, nodeArg, type);
-                    }
-                    else if (!isBehavior)
-                    {
-                        errors.EnsureError(
-                            DocumentErrorSeverity.Severe,
-                            nodeArg,
-                            TexlStrings.ErrBadType_ExpectedType_ProvidedType,
-                            type.GetKindString(),
-                            typeArg.GetKindString());
-                        fArgsValid = false;
-                    }
-                }
-                else if (typeArg.Kind != DKind.Unknown)
-                {
-                    type = typeArg;
-                    fArgsValid = false;
-                }
+                possibleResults.Add((args[i], argTypes[i]));
 
                 // If there are an odd number of args, the last arg also participates.
                 i += 2;
                 if (i == count)
                 {
                     i--;
+                }
+            }
+
+            if (context.Features.PowerFxV1CompatibilityRules)
+            {
+                if (!IfFunction.TryDetermineReturnTypePowerFxV1CompatRules(possibleResults, errors, ref nodeToCoercedTypeMap, out type))
+                {
+                    fArgsValid = false;
+                }
+            }
+            else
+            {
+                if (!IfFunction.TryDetermineReturnTypePowerFxV1CompatRulesDisabled(possibleResults, errors, ref nodeToCoercedTypeMap, out type))
+                {
+                    fArgsValid = false;
                 }
             }
 

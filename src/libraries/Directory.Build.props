@@ -1,8 +1,9 @@
 <!-- Contains common properties that apply to projects under the Libraries folder -->
 <Project>
   <PropertyGroup>
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <LangVersion>9.0</LangVersion>
     <GeneratePackageOnBuild>$(GeneratePackages)</GeneratePackageOnBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>

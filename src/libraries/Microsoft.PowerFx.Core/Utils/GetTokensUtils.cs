@@ -4,6 +4,7 @@
 using System.Collections.Generic;
 using Microsoft.PowerFx.Core.Binding;
 using Microsoft.PowerFx.Core.Public;
+using Microsoft.PowerFx.Intellisense;
 
 namespace Microsoft.PowerFx.Core.Utils
 {
@@ -34,10 +35,10 @@ namespace Microsoft.PowerFx.Core.Utils
                     {
                         case BindKind.Control:
                         case BindKind.OptionSet:
-                        case BindKind.PowerFxResolvedObject:
                             tokens[item.Name] = TokenResultType.HostSymbol;
                             break;
                         case BindKind.LambdaField:
+                        case BindKind.PowerFxResolvedObject:
                             tokens[item.Name] = TokenResultType.Variable;
                             break;
                         default:
@@ -48,10 +49,12 @@ namespace Microsoft.PowerFx.Core.Utils
 
             if (flags.HasFlag(GetTokensFlags.AllFunctions))
             {
-                foreach (var item in binding.NameResolver.Functions)
+#pragma warning disable CS0618 // Type or member is obsolete
+                foreach (var item in binding.NameResolver.Functions.Functions)
                 {
                     tokens[item.QualifiedName] = TokenResultType.Function;
                 }
+#pragma warning restore CS0618 // Type or member is obsolete
             }
 
             return tokens;

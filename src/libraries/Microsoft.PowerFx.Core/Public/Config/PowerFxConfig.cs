@@ -3,81 +3,170 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
-using Microsoft.PowerFx.Core;
+using System.Linq;
+using Microsoft.PowerFx.Core.Binding.BindInfo;
 using Microsoft.PowerFx.Core.Entities;
+using Microsoft.PowerFx.Core.Errors;
 using Microsoft.PowerFx.Core.Functions;
+using Microsoft.PowerFx.Core.Localization;
+using Microsoft.PowerFx.Core.Texl;
 using Microsoft.PowerFx.Core.Types.Enums;
 using Microsoft.PowerFx.Core.Utils;
 
-namespace Microsoft.PowerFx.Core
+namespace Microsoft.PowerFx
 {
     /// <summary>
     /// A container that allows for compiler customization.
     /// </summary>
     public sealed class PowerFxConfig
     {
-        private bool _isLocked;
-        private readonly Dictionary<string, TexlFunction> _extraFunctions;
-        private readonly Dictionary<DName, IExternalEntity> _environmentSymbols;
+        internal static readonly int DefaultMaxCallDepth = 20;
+        internal static readonly int DefaultMaximumExpressionLength = 1000;
 
-        internal IReadOnlyDictionary<string, TexlFunction> ExtraFunctions => _extraFunctions;
-
-        internal IReadOnlyDictionary<DName, IExternalEntity> EnvironmentSymbols => _environmentSymbols;
-
-        internal EnumStore EnumStore { get; }
-
-        internal CultureInfo CultureInfo { get; }
-
-        private PowerFxConfig(CultureInfo cultureInfo, EnumStore enumStore) 
+        /// <summary>
+        /// Global symbols. Additional symbols beyond default function set. 
+        /// </summary>
+        public SymbolTable SymbolTable { get; set; } = new SymbolTable
         {
-            CultureInfo = cultureInfo ?? CultureInfo.CurrentCulture;
-            _isLocked = false;
-            _extraFunctions = new Dictionary<string, TexlFunction>();
-            _environmentSymbols = new Dictionary<DName, IExternalEntity>();
-            EnumStore = enumStore;
-        }      
+            DebugName = "DefaultConfig"
+        };
 
-        public PowerFxConfig(CultureInfo cultureInfo = null)
-            : this(cultureInfo, new EnumStore()) 
+        internal readonly Dictionary<TexlFunction, IAsyncTexlFunction> AdditionalFunctions = new ();
+
+        [Obsolete("Use Config.EnumStore or symboltable directly")]
+        internal EnumStoreBuilder EnumStoreBuilder => SymbolTable.EnumStoreBuilder;
+
+        internal IEnumStore EnumStore => ReadOnlySymbolTable.Compose(SymbolTable);
+
+        public Features Features { get; }
+
+        public int MaxCallDepth { get; set; }
+
+        public int MaximumExpressionLength { get; set; }
+
+        private PowerFxConfig(EnumStoreBuilder enumStoreBuilder, Features features = null)
+        {
+            Features = features ?? Features.None;
+            SymbolTable.EnumStoreBuilder = enumStoreBuilder;
+            MaxCallDepth = DefaultMaxCallDepth;
+            MaximumExpressionLength = DefaultMaximumExpressionLength;
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="PowerFxConfig"/> class.        
+        /// </summary>          
+        public PowerFxConfig()
+            : this(Features.PowerFxV1)
+        {
+        }
+
+        /// <summary>
+        /// Information about available functions.
+        /// </summary>
+        [Obsolete("Migrate to SymbolTables")]
+        public IEnumerable<FunctionInfo> FunctionInfos =>
+            new Engine(this).SupportedFunctions.Functions.Functions
+            .Concat(SymbolTable.Functions.Functions)
+            .Select(f => new FunctionInfo(f));
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="PowerFxConfig"/> class.
+        /// </summary>        
+        /// <param name="features">Features to use.</param>
+        public PowerFxConfig(Features features)
+            : this(new EnumStoreBuilder().WithRequiredEnums(BuiltinFunctionsCore._library), features)
         {
         }
 
         /// <summary>
         /// Stopgap until Enum Store is refactored. Do not rely on, this will be removed. 
         /// </summary>
-        internal static PowerFxConfig BuildWithEnumStore(CultureInfo cultureInfo, EnumStore enumStore)
+        internal static PowerFxConfig BuildWithEnumStore(EnumStoreBuilder enumStoreBuilder)
         {
-            return new PowerFxConfig(cultureInfo, enumStore);
+            return BuildWithEnumStore(enumStoreBuilder, Features.None);
         }
 
-        internal void AddEntity(IExternalEntity entity)
+        internal static PowerFxConfig BuildWithEnumStore(EnumStoreBuilder enumStoreBuilder, Features features)
         {
-            CheckUnlocked();
-
-            _environmentSymbols.Add(entity.EntityName, entity);
+            return BuildWithEnumStore(enumStoreBuilder, BuiltinFunctionsCore._library, features: features);
         }
+
+        internal static PowerFxConfig BuildWithEnumStore(EnumStoreBuilder enumStoreBuilder, TexlFunctionSet coreFunctions)
+        {
+            return BuildWithEnumStore(enumStoreBuilder, coreFunctions, Features.None);
+        }
+
+        internal static PowerFxConfig BuildWithEnumStore(EnumStoreBuilder enumStoreBuilder, TexlFunctionSet coreFunctions, Features features)
+        {
+            var config = new PowerFxConfig(enumStoreBuilder, features);
+
+            config.AddFunctions(coreFunctions);
+
+            return config;
+        }
+
+        // For PAClient cases - JSRunner. These don't derive from Engine. 
+        [Obsolete("Migrate to SymbolTables")]
+        internal void SetCoreFunctions(IEnumerable<TexlFunction> functions)
+        {
+            foreach (var func in functions)
+            {
+                AddFunction(func);
+            }
+        }
+
+        internal bool GetSymbols(string name, out NameLookupInfo symbol) => SymbolTable._variables.TryGetValue(name, out symbol);
+
+        internal IEnumerable<string> GetSuggestableSymbolName() => SymbolTable._variables.Keys;
+
+        internal void AddEntity(IExternalEntity entity, DName displayName = default)
+            => SymbolTable.AddEntity(entity, displayName);
 
         internal void AddFunction(TexlFunction function)
         {
-            CheckUnlocked();
-
-            _extraFunctions.Add(function.GetUniqueTexlRuntimeName(), function);
-        }
-
-        internal void Lock()
-        { 
-            CheckUnlocked();
-
-            _isLocked = true;
-        }
-
-        private void CheckUnlocked()
-        {
-            if (_isLocked)
+            if (function.HasLambdas || function.HasColumnIdentifiers)
             {
-                throw new InvalidOperationException("This PowerFxConfig instance is locked");
+                // We limit to 20 arguments as MaxArity could be set to int.MaxValue 
+                // and checking up to 20 arguments is enough for this validation
+                for (var i = 0; i < Math.Min(function.MaxArity, 20); i++)
+                {
+                    if (function.HasLambdas && function.HasColumnIdentifiers && function.IsLambdaParam(i) && function.IsIdentifierParam(i))
+                    {
+                        (var message, var _) = ErrorUtils.GetLocalizedErrorContent(TexlStrings.ErrInvalidFunction, null, out var errorResource);
+                        throw new ArgumentException(message);
+                    }
+                }
+
+                var overloads = SymbolTable.Functions.WithName(function.Name).Where(tf => tf.HasLambdas || tf.HasColumnIdentifiers);
+
+                if (overloads.Any())
+                {
+                    for (var i = 0; i < Math.Min(function.MaxArity, 20); i++)
+                    {
+                        if ((function.IsLambdaParam(i) && overloads.Any(ov => ov.HasColumnIdentifiers && ov.IsIdentifierParam(i))) ||
+                            (function.IsIdentifierParam(i) && overloads.Any(ov => ov.HasLambdas && ov.IsLambdaParam(i))))
+                        {
+                            (var message, var _) = ErrorUtils.GetLocalizedErrorContent(TexlStrings.ErrInvalidFunction, null, out var errorResource);
+                            throw new ArgumentException(message);
+                        }
+                    }
+                }
             }
+
+            SymbolTable.AddFunction(function);
         }
+
+        internal void AddFunctions(TexlFunctionSet functionSet)
+        {
+            SymbolTable.AddFunctions(functionSet);
+        }
+
+        public void AddOptionSet(OptionSet optionSet, DName optionalDisplayName = default)
+        {
+            AddEntity(optionSet, optionalDisplayName);
+        }
+
+        internal bool TryGetVariable(DName name, out DName displayName)
+            => SymbolTable.TryGetVariable(name, out _, out displayName);
     }
 }

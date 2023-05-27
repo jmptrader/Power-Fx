@@ -1,20 +1,20 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-namespace Microsoft.PowerFx.Core.Public
+namespace Microsoft.PowerFx
 {
-    /*
-     * Indicates the error on a record in a connected data source
-     * This must be kept in sync with the document enum "ErrorKind".
-     */
+    /// <summary>
+    /// Indicates the error on a record in a connected data source. 
+    /// This must be kept in sync with the document enum "ErrorKind".
+    /// </summary>
     public enum ErrorKind
     {
         None = 0,
         Sync = 1,
         MissingRequired = 2,
         CreatePermission = 3,
-        EditPermission = 4,
-        DeletePermission = 5,
+        EditPermissions = 4,
+        DeletePermissions = 5,
         Conflict = 6,
         NotFound = 7,
         ConstraintViolated = 8,
@@ -35,6 +35,9 @@ namespace Microsoft.PowerFx.Core.Public
         Network = 23,
         Numeric = 24,
         InvalidArgument = 25,
-        Internal = 26
+        Internal = 26,
+        NotApplicable = 27,
+        Timeout = 28,
+        Custom = 1000,
     }
 }

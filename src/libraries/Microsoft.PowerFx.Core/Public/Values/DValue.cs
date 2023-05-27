@@ -1,14 +1,14 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-namespace Microsoft.PowerFx.Core.Public.Values
+namespace Microsoft.PowerFx.Types
 {
     /// <summary>
     /// Represents the type (T | Blank | Error), where T is neither Blank nor Error
     /// TableValue stores this class (Rows), and it can be used in any situation
     /// where a value can be either a known type or Blank/Error.
     /// </summary>
-    public class DValue<T>
+    public sealed class DValue<T>
         where T : ValidFormulaValue
     {
         private DValue(T value, BlankValue blank, ErrorValue error)

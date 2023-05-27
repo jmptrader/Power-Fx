@@ -3,19 +3,17 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using Microsoft.PowerFx.Core.Lexer;
-using Microsoft.PowerFx.Core.Lexer.Tokens;
 using Microsoft.PowerFx.Core.Parser;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
-using Microsoft.PowerFx.Core.Syntax.SourceInformation;
-using Microsoft.PowerFx.Core.Syntax.Visitors;
 using Microsoft.PowerFx.Core.UtilityDataStructures;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
+using Microsoft.PowerFx.Syntax.SourceInformation;
 
-namespace Microsoft.PowerFx.Core.Syntax
+namespace Microsoft.PowerFx.Syntax
 {
     // Simple pretty-printing visitor (Task #2489649
     // Todo: currently being used by node.ToString().  Need to figure
@@ -34,11 +32,6 @@ namespace Microsoft.PowerFx.Core.Syntax
 
             var pretty = new TexlPretty();
             return string.Concat(node.Accept(pretty, Precedence.None));
-        }
-
-        public override LazyList<string> Visit(ReplaceableNode node, Precedence parentPrecedence)
-        {
-            throw new NotSupportedException("Replaceable nodes are not supported");
         }
 
         public override LazyList<string> Visit(ErrorNode node, Precedence parentPrecedence)
@@ -74,7 +67,19 @@ namespace Microsoft.PowerFx.Core.Syntax
             Contracts.AssertValue(node);
 
             var nlt = node.Value;
-            return LazyList<string>.Of(nlt != null ? nlt.ToString() : node.NumValue.ToString("R", TexlLexer.LocalizedInstance.Culture));
+            
+            // $$$ can't use current culture
+            return LazyList<string>.Of(nlt != null ? nlt.ToString() : node.NumValue.ToString("R", CultureInfo.CurrentCulture));
+        }
+
+        public override LazyList<string> Visit(DecLitNode node, Precedence parentPrecedence)
+        {
+            Contracts.AssertValue(node);
+
+            var nlt = node.Value;
+            
+            // $$$ can't use current culture
+            return LazyList<string>.Of(nlt != null ? nlt.ToString() : node.DecValue.ToString("G29", CultureInfo.CurrentCulture));
         }
 
         public override LazyList<string> Visit(FirstNameNode node, Precedence parentPrecedence)
@@ -246,7 +251,8 @@ namespace Microsoft.PowerFx.Core.Syntax
             switch (node.Op)
             {
                 case VariadicOp.Chain:
-                    var op = SpacedOper(TexlLexer.LocalizedInstance.LocalizedPunctuatorChainingSeparator);
+                    // $$$ can't use current culture
+                    var op = SpacedOper(TexlLexer.GetLocalizedInstance(CultureInfo.CurrentCulture).LocalizedPunctuatorChainingSeparator);
                     var count = node.Count;
                     var result = LazyList<string>.Empty;
 
@@ -256,7 +262,8 @@ namespace Microsoft.PowerFx.Core.Syntax
                             .With(node.Children[i].Accept(this, Precedence.None));
                         if (i != count - 1)
                         {
-                            result = result.With(SpacedOper(TexlLexer.LocalizedInstance.LocalizedPunctuatorChainingSeparator));
+                            // $$$ can't use current culture
+                            result = result.With(SpacedOper(TexlLexer.GetLocalizedInstance(CultureInfo.CurrentCulture).LocalizedPunctuatorChainingSeparator));
                         }
                     }
 
@@ -282,7 +289,7 @@ namespace Microsoft.PowerFx.Core.Syntax
                     Contracts.Assert(node.Children[i] is StrLitNode);
 
                     var strLit = node.Children[i] as StrLitNode;
-                    result = result.With(CharacterUtils.ExcelEscapeString(strLit.Value));
+                    result = result.With(CharacterUtils.ExcelEscapeString(strLit.Value, true));
                 }
                 else
                 {
@@ -324,7 +331,8 @@ namespace Microsoft.PowerFx.Core.Syntax
         {
             Contracts.AssertValue(node);
 
-            var listSep = TexlLexer.LocalizedInstance.LocalizedPunctuatorListSeparator + " ";
+            // $$$ can't use current culture
+            var listSep = TexlLexer.GetLocalizedInstance(CultureInfo.CurrentCulture).LocalizedPunctuatorListSeparator + " ";
             var result = LazyList<string>.Empty;
             for (var i = 0; i < node.Children.Length; ++i)
             {
@@ -343,7 +351,8 @@ namespace Microsoft.PowerFx.Core.Syntax
         {
             Contracts.AssertValue(node);
 
-            var listSep = TexlLexer.LocalizedInstance.LocalizedPunctuatorListSeparator + " ";
+            // $$$ can't use current culture
+            var listSep = TexlLexer.GetLocalizedInstance(CultureInfo.CurrentCulture).LocalizedPunctuatorListSeparator + " ";
             var result = LazyList<string>.Empty;
             for (var i = 0; i < node.Children.Length; ++i)
             {
@@ -375,7 +384,8 @@ namespace Microsoft.PowerFx.Core.Syntax
         {
             Contracts.AssertValue(node);
 
-            var listSep = TexlLexer.LocalizedInstance.LocalizedPunctuatorListSeparator + " ";
+            // $$$ can't use current culture
+            var listSep = TexlLexer.GetLocalizedInstance(CultureInfo.CurrentCulture).LocalizedPunctuatorListSeparator + " ";
             var result = LazyList<string>.Empty;
             for (var i = 0; i < node.Children.Length; ++i)
             {
@@ -524,11 +534,6 @@ namespace Microsoft.PowerFx.Core.Syntax
                     .Select(GetScriptForToken));
         }
 
-        public override LazyList<string> Visit(ReplaceableNode node, Context context)
-        {
-            throw new NotSupportedException("Replaceable nodes are not supported");
-        }
-
         public override LazyList<string> Visit(ErrorNode node, Context context)
         {
             Contracts.AssertValue(node);
@@ -558,6 +563,13 @@ namespace Microsoft.PowerFx.Core.Syntax
         }
 
         public override LazyList<string> Visit(NumLitNode node, Context context)
+        {
+            Contracts.AssertValue(node);
+
+            return Single(node);
+        }
+
+        public override LazyList<string> Visit(DecLitNode node, Context context)
         {
             Contracts.AssertValue(node);
 
@@ -707,7 +719,7 @@ namespace Microsoft.PowerFx.Core.Syntax
 
                         var strLitNode = nodeSource.Node as StrLitNode;
                         result = result
-                            .With(CharacterUtils.ExcelEscapeString(strLitNode.Value));
+                            .With(CharacterUtils.ExcelEscapeString(strLitNode.Value, true));
                     }
                 }
                 else if (source is TokenSource tokenSource)
@@ -718,7 +730,7 @@ namespace Microsoft.PowerFx.Core.Syntax
 
                         var strLitToken = tokenSource.Token as StrLitToken;
                         result = result
-                            .With(CharacterUtils.ExcelEscapeString(strLitToken.Value));
+                            .With(CharacterUtils.ExcelEscapeString(strLitToken.Value, true));
                     }
                     else if (tokenSource.Token.Kind == TokKind.IslandStart)
                     {
@@ -840,13 +852,13 @@ namespace Microsoft.PowerFx.Core.Syntax
                         .With(GetScriptForToken(tokenSource.Token))
                         .With(GetNewLine(context.IndentDepth + 1));
                 }
-                else if (commentToken != null && (previousToken?.Kind == TokKind.CurlyOpen || previousToken?.Kind == TokKind.Comma) && !commentToken.Value.StartsWith("//") && !commentToken.Value.StartsWith("\n"))
+                else if (commentToken != null && (previousToken?.Kind == TokKind.CurlyOpen || previousToken?.Kind == TokKind.Comma) && !commentToken.Value.StartsWith("//", StringComparison.Ordinal) && !commentToken.Value.StartsWith("\n", StringComparison.Ordinal))
                 {
                     result = result
                         .With(GetScriptForToken(tokenSource.Token))
                         .With(GetNewLine(context.IndentDepth + 1));
                 }
-                else if (commentToken != null && (previousToken?.Kind == TokKind.CurlyOpen || previousToken?.Kind == TokKind.Comma) && !commentToken.Value.StartsWith("//") && commentToken.Value.StartsWith("\n"))
+                else if (commentToken != null && (previousToken?.Kind == TokKind.CurlyOpen || previousToken?.Kind == TokKind.Comma) && !commentToken.Value.StartsWith("//", StringComparison.Ordinal) && commentToken.Value.StartsWith("\n", StringComparison.Ordinal))
                 {
                     result = result
                         .With(GetScriptForToken(tokenSource.Token).TrimStart())

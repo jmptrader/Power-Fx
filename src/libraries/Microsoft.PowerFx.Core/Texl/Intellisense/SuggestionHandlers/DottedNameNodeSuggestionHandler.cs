@@ -6,13 +6,12 @@ using System.Linq;
 using Microsoft.PowerFx.Core.Binding;
 using Microsoft.PowerFx.Core.Binding.BindInfo;
 using Microsoft.PowerFx.Core.Functions;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Types.Enums;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
-namespace Microsoft.PowerFx.Core.Texl.Intellisense
+namespace Microsoft.PowerFx.Intellisense
 {
     internal partial class Intellisense
     {
@@ -44,7 +43,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
 
                 var isOneColumnTable = leftType.IsColumn
                                         && leftNode.Kind == NodeKind.DottedName
-                                        && leftType.Accepts(intellisenseData.Binding.GetType(((DottedNameNode)leftNode).Left));
+                                        && leftType.Accepts(intellisenseData.Binding.GetType(((DottedNameNode)leftNode).Left), exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: true);
 
                 if (cursorPos < ident.Token.Span.Min)
                 {
@@ -161,7 +160,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
 
                 return data.TryGetEnumSymbol(firstNameInfo.Name, binding, out enumSymbol);
             }
-
+            
             private static bool TryGetNamespaceFunctions(TexlNode node, TexlBinding binding, out IEnumerable<TexlFunction> functions)
             {
                 Contracts.AssertValue(node);
@@ -200,8 +199,6 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
                     IntellisenseHelper.AddTopLevelSuggestions(intellisenseData, type);
                     return;
                 }
-
-                IntellisenseHelper.AddSuggestionsForNamesInType(type, intellisenseData, createTableSuggestion: true);
             }
         }
     }

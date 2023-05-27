@@ -55,21 +55,19 @@ namespace Microsoft.PowerFx.Core.Types
         OptionSetValue = 22,
         ViewValue = 23,
         NamedValue = 24,
+        Decimal = 25,
         _LimPrimitive = Control,
 
         // Control type.
-        Control = 25,
+        Control = 26,
 
         // Expand Entity type.
-        DataEntity = 26,
+        DataEntity = 27,
 
-        ObjNull = 27, // A type representing a null value.
+        ObjNull = 28, // A type representing a null value.
 
         // Metadata type,
-        Metadata = 28, // Type represents column metadata.
-
-        // Attachment type,
-        Attachment = 29, // Type represents attachment type which are delay loaded fields at runtime.
+        Metadata = 29, // Type represents column metadata.
 
         // OptionSet type,
         OptionSet = 30,
@@ -85,7 +83,15 @@ namespace Microsoft.PowerFx.Core.Types
         LargeImage = 34,
         UntypedObject = 35,
 
-        _Lim = 36,
+        // Lazy implementations of Record/Table, using LazyTypeProvider for field access indirection
+        LazyRecord = 36,
+        LazyTable = 37,
+
+        Deferred = 38,
+
+        Void = 39,
+
+        _Lim = 40,
 #pragma warning restore SA1300 // Element should begin with upper-case letter
     }
 }

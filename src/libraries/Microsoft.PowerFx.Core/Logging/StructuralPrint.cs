@@ -2,15 +2,12 @@
 // Licensed under the MIT license.
 
 using System;
+using System.Globalization;
 using Microsoft.PowerFx.Core.Binding;
-using Microsoft.PowerFx.Core.Lexer;
-using Microsoft.PowerFx.Core.Lexer.Tokens;
 using Microsoft.PowerFx.Core.Parser;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
-using Microsoft.PowerFx.Core.Syntax.Visitors;
 using Microsoft.PowerFx.Core.UtilityDataStructures;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
 namespace Microsoft.PowerFx.Core.Logging
 {
@@ -18,26 +15,23 @@ namespace Microsoft.PowerFx.Core.Logging
     internal sealed class StructuralPrint : TexlFunctionalVisitor<LazyList<string>, Precedence>
     {
         private readonly TexlBinding _binding;
+        private readonly ISanitizedNameProvider _nameProvider;
 
-        private StructuralPrint(TexlBinding binding = null)
+        private StructuralPrint(TexlBinding binding = null, ISanitizedNameProvider nameProvider = null)
         {
             _binding = binding;
+            _nameProvider = nameProvider;
         }
 
         // Public entry point for prettyprinting TEXL parse trees
-        public static string Print(TexlNode node, TexlBinding binding = null)
+        public static string Print(TexlNode node, TexlBinding binding = null, ISanitizedNameProvider nameProvider = null)
         {
             Contracts.AssertValue(node);
 
-            var pretty = new StructuralPrint(binding);
+            var pretty = new StructuralPrint(binding, nameProvider);
             return string.Concat(node.Accept(pretty, Precedence.None));
         }
-
-        public override LazyList<string> Visit(ReplaceableNode node, Precedence parentPrecedence)
-        {
-            return LazyList<string>.Of("#$replaceable$#");
-        }
-
+        
         public override LazyList<string> Visit(ErrorNode node, Precedence parentPrecedence)
         {
             Contracts.AssertValue(node);
@@ -70,9 +64,22 @@ namespace Microsoft.PowerFx.Core.Logging
             return LazyList<string>.Of("#$number$#");
         }
 
+        public override LazyList<string> Visit(DecLitNode node, Precedence parentPrecedence)
+        {
+            Contracts.AssertValue(node);
+
+            var nlt = node.Value;
+            return LazyList<string>.Of("#$decimal$#");
+        }
+
         public override LazyList<string> Visit(FirstNameNode node, Precedence parentPrecedence)
         {
             Contracts.AssertValue(node);
+
+            if (_nameProvider != null && _nameProvider.TrySanitizeIdentifier(node.Ident, out var sanitizedName))
+            {
+                return LazyList<string>.Of(sanitizedName);
+            }
 
             var info = _binding?.GetInfo(node);
             if (info != null && info.Kind != BindKind.Unknown)
@@ -116,8 +123,21 @@ namespace Microsoft.PowerFx.Core.Logging
             }
             else
             {
-                values = values.With(node.RightNode?.Accept(this, parentPrecedence) ??
-                     LazyList<string>.Of("#$righthandid$#"));
+                if (node.RightNode != null)
+                {
+                    values = values.With(node.RightNode?.Accept(this, parentPrecedence));
+                }
+                else
+                {
+                    if (_nameProvider != null && _nameProvider.TrySanitizeIdentifier(node.Right, out var sanitizedName, node))
+                    {
+                        values = values.With(sanitizedName);
+                    }
+                    else
+                    {
+                        values = values.With("#$righthandid$#");
+                    }
+                }
             }
 
             return ApplyPrecedence(parentPrecedence, Precedence.Primary, values);
@@ -248,7 +268,8 @@ namespace Microsoft.PowerFx.Core.Logging
                             .With(node.Children[i].Accept(this, Precedence.None));
                         if (i != count - 1)
                         {
-                            result = result.With(SpacedOper(TexlLexer.LocalizedInstance.LocalizedPunctuatorChainingSeparator));
+                            // $$$ can't use current culture
+                            result = result.With(SpacedOper(TexlLexer.GetLocalizedInstance(CultureInfo.CurrentCulture).LocalizedPunctuatorChainingSeparator));
                         }
                     }
 
@@ -313,7 +334,8 @@ namespace Microsoft.PowerFx.Core.Logging
         {
             Contracts.AssertValue(node);
 
-            var listSep = TexlLexer.LocalizedInstance.LocalizedPunctuatorListSeparator + " ";
+            // $$$ can't use current culture
+            var listSep = TexlLexer.GetLocalizedInstance(CultureInfo.CurrentCulture).LocalizedPunctuatorListSeparator + " ";
             var result = LazyList<string>.Empty;
             for (var i = 0; i < node.Children.Length; ++i)
             {
@@ -332,7 +354,8 @@ namespace Microsoft.PowerFx.Core.Logging
         {
             Contracts.AssertValue(node);
 
-            var listSep = TexlLexer.LocalizedInstance.LocalizedPunctuatorListSeparator + " ";
+            // $$$ can't use current culture
+            var listSep = TexlLexer.GetLocalizedInstance(CultureInfo.CurrentCulture).LocalizedPunctuatorListSeparator + " ";
             var result = LazyList<string>.Empty;
             for (var i = 0; i < node.Children.Length; ++i)
             {
@@ -364,7 +387,8 @@ namespace Microsoft.PowerFx.Core.Logging
         {
             Contracts.AssertValue(node);
 
-            var listSep = TexlLexer.LocalizedInstance.LocalizedPunctuatorListSeparator + " ";
+            // $$$ can't use current culture
+            var listSep = TexlLexer.GetLocalizedInstance(CultureInfo.CurrentCulture).LocalizedPunctuatorListSeparator + " ";
             var result = LazyList<string>.Empty;
             for (var i = 0; i < node.Children.Length; ++i)
             {

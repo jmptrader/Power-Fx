@@ -1,17 +1,19 @@
-﻿>> Boolean("true")
+#SETUP: NumberIsFloat  // no coercion from decimal to boolean yet
+
+>> Boolean("true")
 true
 
 >> Boolean("false")
 false
 
 >> Boolean("x")
-#Error
+Error({Kind:ErrorKind.InvalidArgument})
 
 >> Boolean(" true")
-true
+Error({Kind:ErrorKind.InvalidArgument})
 
 >> Boolean(" false")
-false
+Error({Kind:ErrorKind.InvalidArgument})
 
 >> Boolean("True")
 true
@@ -19,23 +21,44 @@ true
 >> Boolean("False")
 false
 
+>> Boolean("TRUE")
+true
+
+>> Boolean("FALSE")
+false
+
 >> Boolean(Text(Blank()))
 Blank()
 
->> Boolean(Text(0/1))
-#Error
+>> Boolean(Text(1/0))
+Error({Kind:ErrorKind.Div0})
 
 >> Boolean("0")
-#Error
+Error({Kind:ErrorKind.InvalidArgument})
 
 >> Boolean(0)
-Errors: Error 0-10: The function 'Boolean' has some invalid arguments.|Error 8-9: Invalid argument type (Number). Expecting a Text value instead.
+false
 
->> Boolean([])
-Errors: Error 0-11: The function 'Boolean' has some invalid arguments.|Error 8-10: Invalid argument type (Table). Expecting a Text value instead.
+>> Boolean(1)
+true
+
+>> Boolean(2)
+true
 
 >> Boolean(true)
-Errors: Error 0-13: The function 'Boolean' has some invalid arguments.|Error 8-12: Invalid argument type (Boolean). Expecting a Text value instead.
+true
 
 >> Boolean(false)
-Errors: Error 0-14: The function 'Boolean' has some invalid arguments.|Error 8-13: Invalid argument type (Boolean). Expecting a Text value instead.
+false
+
+>> Boolean(true Or true)
+true
+
+>> Boolean(If(1<0, true))
+Blank()
+
+>> Boolean(If(0<1, true))
+true
+
+>> Boolean(IfError(true, false))
+true

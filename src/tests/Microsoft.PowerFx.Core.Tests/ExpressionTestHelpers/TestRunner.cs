@@ -5,25 +5,29 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
-using Microsoft.PowerFx.Core.Public.Types;
-using Microsoft.PowerFx.Core.Public.Values;
+using System.Text.RegularExpressions;
+using Microsoft.PowerFx.Core.Parser;
+using Microsoft.PowerFx.Syntax;
+using Microsoft.PowerFx.Types;
 
 namespace Microsoft.PowerFx.Core.Tests
-{    
+{
     /// <summary>
     /// Parse test files and invoke runners to execute them. 
     /// </summary>
     public class TestRunner
     {
         private readonly BaseRunner[] _runners;
-        private readonly List<TestCase> _tests = new List<TestCase>();
 
-        // Mapping of a Test's key to the test case in _test list.
+        // Mapping of a Test's key to the test case in Test list.
         // Used for when we need to update the test. 
         private readonly Dictionary<string, TestCase> _keyToTests = new Dictionary<string, TestCase>(StringComparer.Ordinal);
 
-        public IEnumerable<TestCase> Tests => _tests;
+        // Expose tests so that host can manipulate list directly. 
+        // Also populate this by calling various Add*() functions to parse. 
+        public List<TestCase> Tests { get; set; } = new List<TestCase>();
 
         // Files that have been disabled. 
         public HashSet<string> DisabledFiles = new HashSet<string>();
@@ -42,47 +46,137 @@ namespace Microsoft.PowerFx.Core.Tests
 
         public string TestRoot { get; set; } = GetDefaultTestDir();
 
-        public void AddDir(string directory = "")
+        // Parses a comma delimited setup string, as found in TxtFileDataAttributes and the start of .txt files,
+        // into a dictionary for passing to AddDir, AddFile, etc.  This routine is used both to determine what
+        // the current testing context supports (with TxtFileDataAtrributes) and what a given .txt file requires
+        // (with AddFile).  These two dictionaries must be compatible and not contradict for a test to run.
+        //
+        // Dictionary contents, with NumberIsFloat as an example:
+        //    <NumberIsFloat, true> = "NumberIsFloat" was specified
+        //    <NumberIsFloat, false> = "disable:NumberIsFloat" was specified
+        //
+        // Use "Default" for all settings not explicilty called out.  Without Default, if a setting is not
+        // specified, the test can be run with or without the setting.
+        //
+        // Setting strings are validated by here.  Any of these are possible choices:
+        //    * Engine.Features, determined through reflection
+        //    * TexlParser.Flags, determined through reflection
+        //    * Default, special case
+        //    * PowerFxV1, special case, will expand to its constituent Features
+        //    * Other handlers listed in this routine
+        public static Dictionary<string, bool> ParseSetupString(string setup)
+        {
+            var settings = new Dictionary<string, bool>();
+            var possible = new HashSet<string>();
+            var powerFxV1 = new Dictionary<string, bool>();
+
+            // Features
+            foreach (var featureProperty in typeof(Features).GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (featureProperty.PropertyType == typeof(bool) && featureProperty.CanWrite)
+                {
+                    possible.Add(featureProperty.Name);
+                    if ((bool)featureProperty.GetValue(Features.PowerFxV1))
+                    {
+                        powerFxV1.Add(featureProperty.Name, true);
+                    }
+                }
+            }
+
+            // Parser Flags
+            foreach (var parserFlag in System.Enum.GetValues(typeof(TexlParser.Flags)))
+            {
+                possible.Add(parserFlag.ToString());
+            }
+
+            possible.Add("Default");
+            possible.Add("PowerFxV1");
+            possible.Add("DisableMemChecks");
+            possible.Add("TimeZoneInfo");
+            possible.Add("MutationFunctionsTestSetup");
+            possible.Add("OptionSetTestSetup");
+            possible.Add("AsyncTestSetup");
+            possible.Add("OptionSetSortTestSetup");
+            possible.Add("AllEnumsSetup");
+            possible.Add("RegEx");
+
+            foreach (Match match in Regex.Matches(setup, @"(disable:)?(([\w]+|//)(\([^\)]*\))?)"))
+            {
+                bool enabled = !(match.Groups[1].Value == "disable:");
+                var name = match.Groups[3].Value;
+                var complete = match.Groups[2].Value;
+
+                // end of line comment on settings string
+                if (name == "//")
+                {
+                    break;
+                }
+
+                if (!possible.Contains(name))
+                {
+                    throw new ArgumentException($"Setup string not found: {name} from \"{setup}\"");
+                }
+
+                settings.Add(complete, enabled);
+
+                if (match.Groups[2].Value == "PowerFxV1")
+                {
+                    foreach (var pfx1Feature in powerFxV1)
+                    {
+                        settings.Add(pfx1Feature.Key, true);
+                    }
+                }
+            }
+
+            return settings;
+        }
+
+        public void AddDir(Dictionary<string, bool> setup, string directory = "")
         {
             directory = Path.GetFullPath(directory, TestRoot);
             var allFiles = Directory.EnumerateFiles(directory);
 
-            AddFile(allFiles);
+            AddFile(setup, allFiles);
         }
 
-        public void AddFile(params string[] files)
+        public void AddFile(Dictionary<string, bool> setup, params string[] files)
         {
             var x = (IEnumerable<string>)files;
-            AddFile(x);
+            AddFile(setup, x);
         }
 
-        public void AddFile(IEnumerable<string> files)
+        public void AddFile(Dictionary<string, bool> setup, IEnumerable<string> files)
         {
             foreach (var file in files)
             {
-                AddFile(file);
+                AddFile(setup, file);
             }
         }
 
         // Directive should start with #, end in : like "#SETUP:"
         // Returns true if matched; false if not. Throws on error.
-        private static bool TryParseDirective(string line, string directive, ref string param)
+        private static bool TryParseDirective(string line, string directive, out string param)
         {
             if (line.StartsWith(directive, StringComparison.OrdinalIgnoreCase))
             {
-                if (param != null)
+                param = line.Substring(directive.Length).Trim();
+
+                // strip any end of line comment
+                if (param.Contains("//"))
                 {
-                    throw new InvalidOperationException($"Can't have multiple {directive}");
+                    param = param.Substring(0, param.IndexOf("//"));
                 }
 
-                param = line.Substring(directive.Length).Trim();
                 return true;
             }
-
-            return false;  
+            else
+            {
+                param = null;
+                return false;
+            }
         }
 
-        public void AddFile(string thisFile)
+        public void AddFile(Dictionary<string, bool> setup, string thisFile)
         {
             thisFile = Path.GetFullPath(thisFile, TestRoot);
 
@@ -92,17 +186,19 @@ namespace Microsoft.PowerFx.Core.Tests
             // >> indicates input expression
             // next line is expected result.
 
+            Exception ParseError(int lineNumber, string message) => new InvalidOperationException(
+                $"{Path.GetFileName(thisFile)} {lineNumber}: {message}");
+
             TestCase test = null;
+
+            string fileSetup = null;
+            string fileOveride = null;
+            Dictionary<string, bool> fileSetupDict = new Dictionary<string, bool>();
 
             var i = -1;
 
-            // Preprocess file directives
-            // #Directive: Parameter
-            string fileSetup = null;
-            string fileOveride = null;
-            
             while (i < lines.Length - 1)
-            {               
+            {
                 var line = lines[i + 1];
                 if (string.IsNullOrWhiteSpace(line) || line.StartsWith("//"))
                 {
@@ -112,31 +208,65 @@ namespace Microsoft.PowerFx.Core.Tests
 
                 if (line.Length > 1 && line[0] == '#')
                 {
-                    string fileDisable = null;
-                    if (TryParseDirective(line, "#DISABLE:", ref fileDisable))
+                    if (TryParseDirective(line, "#DISABLE:", out var fileDisable))
                     {
                         DisabledFiles.Add(fileDisable);
 
                         // Will remove all cases in this file.
                         // Can apply to multiple files. 
-                        var countRemoved = _tests.RemoveAll(test => string.Equals(Path.GetFileName(test.SourceFile), fileDisable, StringComparison.OrdinalIgnoreCase));                        
+                        var countRemoved = Tests.RemoveAll(test => string.Equals(Path.GetFileName(test.SourceFile), fileDisable, StringComparison.OrdinalIgnoreCase));
                     }
-                    else if (TryParseDirective(line, "#SETUP:", ref fileSetup) ||
-                      TryParseDirective(line, "#OVERRIDE:", ref fileOveride))
+                    else if (TryParseDirective(line, "#SETUP:", out var thisSetup))
                     {
-                        // flag is set, no additional work needed.
+                        foreach (var flag in ParseSetupString(thisSetup))
+                        {
+                            if (fileSetupDict.ContainsKey(flag.Key) && fileSetupDict[flag.Key] != flag.Value)
+                            {
+                                // Multiple setup lines are fine, but can't contradict.
+                                // ParseSetupString may expand aggregate handlers, such as PowerFxV1, which may create unexpected contradictions.
+                                throw new InvalidOperationException($"Duplicate and contradictory #SETUP directives: {line} {(flag.Value ? string.Empty : "disable:")}{flag.Key}");
+                            }
+                            else
+                            {
+                                fileSetupDict.Add(flag.Key, flag.Value);
+                            }
+                        }
+                    }
+                    else if (TryParseDirective(line, "#OVERRIDE:", out var thisOveride))
+                    {
+                        if (fileOveride != null)
+                        {
+                            throw new InvalidOperationException($"Can't have multiple #OVERRIDE: directives");
+                        }
+
+                        fileOveride = thisOveride;
                     }
                     else
                     {
-                        throw new InvalidOperationException($"Unrecognized directive: {line}");
+                        throw ParseError(i, $"Unrecognized directive: {line}");
                     }
 
                     i++;
                     continue;
-                }                
+                }
 
-                break;                
-            }            
+                break;
+            }
+
+            // If the test is incompatible with the base setup, skip it.
+            // It is OK for the test to turn on handlers and features that don't conflict.
+            foreach (var flag in fileSetupDict)
+            {
+                if ((setup.ContainsKey(flag.Key) && flag.Value != setup[flag.Key]) ||
+                    (!setup.ContainsKey(flag.Key) && setup.ContainsKey("Default") && flag.Value != setup["Default"]))
+                {
+                    return;
+                }
+            }        
+
+            fileSetup = string.Join(",", fileSetupDict.Select(i => (i.Value ? string.Empty : "disable:") + i.Key));
+
+            List<string> duplicateTests = new List<string>();
 
             while (true)
             {
@@ -154,6 +284,11 @@ namespace Microsoft.PowerFx.Core.Tests
 
                 if (line.StartsWith(">>"))
                 {
+                    if (test != null)
+                    {
+                        throw ParseError(i, $"parse error- multiple test inputs in a row. Previous input is: {test.Input}");
+                    }
+
                     line = line.Substring(2).Trim();
                     test = new TestCase
                     {
@@ -179,216 +314,73 @@ namespace Microsoft.PowerFx.Core.Tests
                     // handle engine-specific results
                     if (line.StartsWith("/*"))
                     {
-                        throw new InvalidOperationException($"Multiline comments aren't supported in output");                        
+                        throw ParseError(i, $"Multiline comments aren't supported in output");
                     }
 
-                    test.Expected = line.Trim();
+                    test.Expected = line.Trim();                    
 
                     var key = test.GetUniqueId(fileOveride);
                     if (_keyToTests.TryGetValue(key, out var existingTest))
                     {
                         // Must be in different sources
-                        if (existingTest.SourceFile == test.SourceFile)
+                        if (existingTest.SourceFile == test.SourceFile && existingTest.SetupHandlerName == test.SetupHandlerName)
                         {
-                            throw new InvalidOperationException($"Duplicate test cases in {Path.GetFileName(test.SourceFile)} on line {test.SourceLine} and {existingTest.SourceLine}");
+                            duplicateTests.Add($"Duplicate test cases in {Path.GetFileName(test.SourceFile)} on line {test.SourceLine} and {existingTest.SourceLine}");
                         }
-                        
+
                         // Updating an existing test. 
                         // Inputs are the same, but update the results.
-                        existingTest.Expected = test.Expected;
-                        existingTest.SourceFile = test.SourceFile;
-                        existingTest.SourceLine = test.SourceLine;
+                        existingTest.MarkOverride(test);
                     }
                     else
                     {
                         // New test
-                        _tests.Add(test);
+                        Tests.Add(test);
 
                         _keyToTests[key] = test;
-                    }
+                    }                    
 
                     test = null;
-                } 
-                else 
-                {
-                    throw new InvalidOperationException($"Parse error at {Path.GetFileName(thisFile)} on line {i}");
                 }
+                else
+                {
+                    throw ParseError(i, $"Parse error");
+                }
+            }
+
+            if (test != null)
+            {
+                throw ParseError(i, "Parse error - missing test result");
+            }
+
+            if (duplicateTests.Any())
+            {
+                throw ParseError(0, string.Join("\r\n", duplicateTests));
             }
         }
 
-        public (int total, int failed, int passed, string output) RunTests()
+        public TestRunFullResults RunTests(bool numberIsFloat = false)
         {
+            var summary = new TestRunFullResults();
+
             if (_runners.Length == 0)
             {
                 throw new InvalidOperationException($"Need to specify a runner to run tests");
             }
 
-            var total = 0;
-            var fail = 0;
-            var pass = 0;
-            var sb = new StringBuilder();
-
-            foreach (var testCase in _tests)
+            foreach (var testCase in Tests)
             {
                 foreach (var runner in _runners)
                 {
-                    total++;
-
                     var engineName = runner.GetName();
 
-                    var (result, msg) = runner.RunAsync(testCase).Result;
+                    var (result, msg) = runner.RunTestCase(testCase);
 
-                    var prefix = $"Test {Path.GetFileName(testCase.SourceFile)}:{testCase.SourceLine}: ";
-                    switch (result)
-                    {
-                        case TestResult.Pass:
-                            pass++;
-                            sb.Append(".");
-                            break;
-
-                        case TestResult.Fail:
-                            sb.AppendLine();
-                            sb.AppendLine($"FAIL: {engineName}, {Path.GetFileName(testCase.SourceFile)}:{testCase.SourceLine}");
-                            sb.AppendLine($"FAIL: {testCase.Input}");
-                            sb.AppendLine($"{msg}");
-                            sb.AppendLine();
-                            fail++;
-                            break;
-
-                        case TestResult.Skip:
-                            sb.Append("-");
-                            break;
-                    }
+                    summary.AddResult(testCase, result, engineName, msg);
                 }
             }
 
-            sb.AppendLine();
-            sb.AppendLine($"{total} total. {pass} passed. {fail} failed");
-            Console.WriteLine(sb.ToString());
-            return (total, fail, pass, sb.ToString());
-        }
-
-        public static string TestToString(FormulaValue result)
-        {
-            var sb = new StringBuilder();
-            try
-            {
-                TestToString(result, sb);
-            }
-            catch (Exception e)
-            {
-                // This will cause a diff and test failure below. 
-                sb.Append($"<exception writing result: {e.Message}>");
-            }
-
-            var actualStr = sb.ToString();
-            return actualStr;
-        }
-
-        // $$$ Move onto FormulaValue. 
-        // Result here should be a string value that could be parsed. 
-        // Normalize so we can use this in test cases. 
-        internal static void TestToString(FormulaValue result, StringBuilder sb)
-        {
-            if (result is NumberValue n)
-            {
-                sb.Append(n.Value);
-            }
-            else if (result is BooleanValue b)
-            {
-                sb.Append(b.Value ? "true" : "false");
-            }
-            else if (result is StringValue s)
-            {
-                // $$$ proper escaping?
-                sb.Append('"' + s.Value + '"');
-            }
-            else if (result is TableValue t)
-            {
-                var tableType = (TableType)t.Type;
-                var canUseSquareBracketSyntax = t.IsColumn && t.Rows.All(r => r.IsValue) && tableType.GetNames().First().Name == "Value";
-                if (canUseSquareBracketSyntax)
-                {
-                    sb.Append('[');
-                }
-                else
-                {
-                    sb.Append("Table(");
-                }
-
-                var dil = string.Empty;
-                foreach (var row in t.Rows)
-                {
-                    sb.Append(dil);
-                    dil = ",";
-
-                    if (canUseSquareBracketSyntax)
-                    {
-                        var val = row.Value.Fields.First().Value;
-                        TestToString(val, sb);
-                    }
-                    else
-                    {
-                        if (row.IsValue)
-                        {
-                            TestToString(row.Value, sb);
-                        }
-                        else
-                        {
-                            TestToString(row.ToFormulaValue(), sb);
-                        }
-                    }
-
-                    dil = ",";
-                }
-
-                if (canUseSquareBracketSyntax)
-                {
-                    sb.Append(']');
-                }
-                else
-                {
-                    sb.Append(')');
-                }
-            }
-            else if (result is RecordValue r)
-            {
-                var fields = r.Fields.ToArray();
-                Array.Sort(fields, (a, b) => string.CompareOrdinal(a.Name, b.Name));
-
-                sb.Append('{');
-                var dil = string.Empty;
-
-                foreach (var field in fields)
-                {
-                    sb.Append(dil);
-                    sb.Append(field.Name);
-                    sb.Append(':');
-                    TestToString(field.Value, sb);
-
-                    dil = ",";
-                }
-
-                sb.Append('}');
-            }
-            else if (result is BlankValue)
-            {
-                sb.Append("Blank()");
-            }
-            else if (result is DateValue d)
-            {
-                // Date(YYYY,MM,DD)
-                var date = d.Value;
-                sb.Append($"Date({date.Year},{date.Month},{date.Day})");
-            }
-            else if (result is ErrorValue)
-            {
-                sb.Append(result);
-            }
-            else
-            {
-                throw new InvalidOperationException($"unsupported value type: {result.GetType().Name}");
-            }
+            return summary;
         }
     }
 }

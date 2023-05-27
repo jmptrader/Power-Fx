@@ -1,11 +1,20 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 using Microsoft.PowerFx.Core.IR;
+using Microsoft.PowerFx.Core.Types;
+using Microsoft.PowerFx.Core.Utils;
+using static Microsoft.PowerFx.Syntax.PrettyPrintVisitor;
 
-namespace Microsoft.PowerFx.Core.Public.Values
+namespace Microsoft.PowerFx.Types
 {
+    /// <summary>
+    /// A Runtime error. 
+    /// </summary>
     public class ErrorValue : FormulaValue
     {
         private readonly List<ExpressionError> _errors = new List<ExpressionError>();
@@ -63,6 +72,46 @@ namespace Microsoft.PowerFx.Core.Public.Values
                 {
                     yield return error;
                 }
+            }
+        }
+
+        public override void ToExpression(StringBuilder sb, FormulaValueSerializerSettings settings)
+        {            
+            var flag = true;
+
+            sb.Append("Error(");
+
+            if (_errors.Count > 1)
+            {
+                sb.Append("Table(");
+            }          
+
+            foreach (var error in _errors)
+            {
+                if (!flag)
+                {
+                    sb.Append(",");
+                }
+
+                flag = false;
+
+                sb.Append("{Kind:ErrorKind.");
+                sb.Append(error.Kind.ToString());
+
+                if (error.Message != null && !settings.UseCompactRepresentation)
+                {
+                    sb.Append(", Message:");
+                    sb.Append(CharacterUtils.ToPlainText(error.Message));
+                }
+
+                sb.Append("}");
+            }
+
+            sb.Append(")");
+
+            if (_errors.Count > 1)
+            {
+                sb.Append(")");
             }
         }
     }

@@ -16,16 +16,16 @@
 3
 
 >> 1 + (1/0)
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> 1 - (1/0)
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> 1 * (1/0)
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> 1 / (1/0)
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> 5-3
 2
@@ -35,7 +35,7 @@
 -3
 
 >> -(1/0)
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> 5 - -3
 8
@@ -59,7 +59,7 @@
 2
 
 >> (1/0)%
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> 1 * 50%
 0.5
@@ -104,19 +104,68 @@ false
 true
 
 >> 5 < 1/0
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> 5 <= 1/0
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> 5 > 1/0
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> 5 >= 1/0
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> 5 = 1/0
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> 5 <> 1/0
-#Error
+Error({Kind:ErrorKind.Div0})
+
+// Blank coercions
+>> 1 < If(1<0,1)
+false
+
+>> 1 > If(1<0,1)
+true
+
+>> 1 <= If(1<0,1)
+false
+
+>> 1 >= If(1<0,1)
+true
+
+>> If(1<0,1) < 0
+false
+
+>> If(1<0,1) > 0
+false
+
+>> If(1<0,1) <= 0
+true
+
+>> If(1<0,1) >= 0
+true
+
+>> 1 < Blank()
+false
+
+>> 1 > Blank()
+true
+
+>> 1 <= Blank()
+false
+
+>> 1 >= Blank()
+true
+
+>> Blank() < 0
+false
+
+>> Blank() > 0
+false
+
+>> Blank() <= 0
+true
+
+>> Blank() >= 0
+true

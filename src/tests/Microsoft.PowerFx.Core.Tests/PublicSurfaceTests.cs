@@ -1,10 +1,12 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
-using Newtonsoft.Json.Serialization;
+using Microsoft.PowerFx.Syntax;
 using Xunit;
 
 namespace Microsoft.PowerFx.Core.Tests
@@ -12,82 +14,169 @@ namespace Microsoft.PowerFx.Core.Tests
     public class PublicSurfaceTests
     {
         [Fact]
-        public void Test()
+        public void PublicSurface_Tests()
         {
             var asm = typeof(Parser.TexlParser).Assembly;
 
+            // The goal for public namespaces is to make the SDK easy for the consumer. 
+            // Namespace principles for public classes:
+            // - prefer fewer namespaces. See C# for example: https://docs.microsoft.com/en-us/dotnet/api/microsoft.codeanalysis
+            // - For easy discovery, but Engine in "Microsoft.PowerFx".
+            // - For sub areas with many related classes, cluster into a single subnamespace.
+            // - Avoid nesting more than 1 level deep
+
             var allowed = new HashSet<string>()
             {
-                "Microsoft.PowerFx.Core.Texl.Intellisense.IIntellisenseResult",
-                "Microsoft.PowerFx.Core.Texl.Intellisense.IIntellisenseSuggestion",
-                "Microsoft.PowerFx.Core.Texl.Intellisense.SuggestionIconKind",
-                "Microsoft.PowerFx.Core.Texl.Intellisense.SuggestionKind",
-                "Microsoft.PowerFx.Core.Texl.Intellisense.UIString",
-                "Microsoft.PowerFx.Core.Texl.Intellisense.SignatureHelp.ParameterInformation",
-                "Microsoft.PowerFx.Core.Texl.Intellisense.SignatureHelp.SignatureHelp",
-                "Microsoft.PowerFx.Core.Texl.Intellisense.SignatureHelp.SignatureInformation",                
-                "Microsoft.PowerFx.Core.PowerFxConfig",
-                "Microsoft.PowerFx.Core.Public.CheckResult",
-                "Microsoft.PowerFx.Core.Public.ErrorKind",
-                "Microsoft.PowerFx.Core.Public.ExpressionError",
-                "Microsoft.PowerFx.Core.Public.FormulaWithParameters",
-                "Microsoft.PowerFx.Core.Public.IExpression",
-                "Microsoft.PowerFx.Core.Public.IPowerFxEngine",
-                "Microsoft.PowerFx.Core.Public.IPowerFxScope",
-                "Microsoft.PowerFx.Core.Public.IPowerFxScopeDisplayName",
-                "Microsoft.PowerFx.Core.Public.TokenResultType",
-                "Microsoft.PowerFx.Core.Public.Values.BlankValue",
-                "Microsoft.PowerFx.Core.Public.Values.BooleanValue",
-                "Microsoft.PowerFx.Core.Public.Values.ColorValue",
-                "Microsoft.PowerFx.Core.Public.Values.UntypedObjectValue",
-                "Microsoft.PowerFx.Core.Public.Values.IUntypedObject",
-                "Microsoft.PowerFx.Core.Public.Values.DateTimeValue",
-                "Microsoft.PowerFx.Core.Public.Values.DateValue",
-                "Microsoft.PowerFx.Core.Public.Values.DValue`1",
-                "Microsoft.PowerFx.Core.Public.Values.ErrorValue",
-                "Microsoft.PowerFx.Core.Public.Values.FormulaValue",
-                "Microsoft.PowerFx.Core.Public.Values.GuidValue",
-                "Microsoft.PowerFx.Core.Public.Values.IValueVisitor",
-                "Microsoft.PowerFx.Core.Public.Values.NamedValue",
-                "Microsoft.PowerFx.Core.Public.Values.NumberValue",
-                "Microsoft.PowerFx.Core.Public.Values.OptionSetValue",
-                "Microsoft.PowerFx.Core.Public.Values.PrimitiveValue`1",
-                "Microsoft.PowerFx.Core.Public.Values.RecordValue",
-                "Microsoft.PowerFx.Core.Public.Values.StringValue",
-                "Microsoft.PowerFx.Core.Public.Values.TableValue",
-                "Microsoft.PowerFx.Core.Public.Values.TimeValue",
-                "Microsoft.PowerFx.Core.Public.Values.ValidFormulaValue",
-                "Microsoft.PowerFx.Core.Public.Types.AggregateType",
-                "Microsoft.PowerFx.Core.Public.Types.BlankType",
-                "Microsoft.PowerFx.Core.Public.Types.BooleanType",
-                "Microsoft.PowerFx.Core.Public.Types.ColorType",
-                "Microsoft.PowerFx.Core.Public.Types.UntypedObjectType",
-                "Microsoft.PowerFx.Core.Public.Types.DateTimeNoTimeZoneType",
-                "Microsoft.PowerFx.Core.Public.Types.DateTimeType",
-                "Microsoft.PowerFx.Core.Public.Types.DateType",
-                "Microsoft.PowerFx.Core.Public.Types.FormulaType",
-                "Microsoft.PowerFx.Core.Public.Types.GuidType",
-                "Microsoft.PowerFx.Core.Public.Types.ITypeVistor",
-                "Microsoft.PowerFx.Core.Public.Types.NamedFormulaType",
-                "Microsoft.PowerFx.Core.Public.Types.NumberType",
-                "Microsoft.PowerFx.Core.Public.Types.OptionSetValueType",
-                "Microsoft.PowerFx.Core.Public.Types.RecordType",
-                "Microsoft.PowerFx.Core.Public.Types.StringType",
-                "Microsoft.PowerFx.Core.Public.Types.TableType",
-                "Microsoft.PowerFx.Core.Public.Types.TimeType",
-                "Microsoft.PowerFx.Core.Public.Types.HyperlinkType",
-                "Microsoft.PowerFx.Core.Public.Types.ExternalTypeKind",
-                "Microsoft.PowerFx.Core.Public.Types.ExternalType",
+                // Core namespace. 
+                "Microsoft.PowerFx.CheckResult",
+                "Microsoft.PowerFx.Core.Parser.ParseFormulasResult",
+                "Microsoft.PowerFx.Engine",
+                "Microsoft.PowerFx.ErrorKind",
+                "Microsoft.PowerFx.ErrorSeverity",
+                "Microsoft.PowerFx.ExpressionError",
+                "Microsoft.PowerFx.Features",
+                "Microsoft.PowerFx.FormulaWithParameters",
+                "Microsoft.PowerFx.FunctionInfo",
+                "Microsoft.PowerFx.NameCollisionException",
+                "Microsoft.PowerFx.OptionSet",
+                "Microsoft.PowerFx.ParseResult",
+                "Microsoft.PowerFx.ParserOptions",                
+
+                // Config & Symbols
+                "Microsoft.PowerFx.FormulaValueSerializerSettings",
+                "Microsoft.PowerFx.ISymbolSlot",
+                "Microsoft.PowerFx.PowerFxConfig",
+                "Microsoft.PowerFx.ReadOnlySymbolTable",
+                "Microsoft.PowerFx.SymbolTable",
+
+                // Lexer                
+                "Microsoft.PowerFx.Syntax.BinaryOp",
+                "Microsoft.PowerFx.Syntax.CommentToken",
+                "Microsoft.PowerFx.Syntax.DecLitToken",
+                "Microsoft.PowerFx.Syntax.ErrorToken",
+                "Microsoft.PowerFx.Syntax.IdentToken",
+                "Microsoft.PowerFx.Syntax.NumLitToken",
+                "Microsoft.PowerFx.Syntax.Span",
+                "Microsoft.PowerFx.Syntax.StrLitToken",
+                "Microsoft.PowerFx.Syntax.Token",
+                "Microsoft.PowerFx.Syntax.TokKind",
+                "Microsoft.PowerFx.Syntax.UnaryOp",
+                "Microsoft.PowerFx.Syntax.VariadicOp",
+
+                // Parse nodes
+                "Microsoft.PowerFx.Syntax.AsNode",
+                "Microsoft.PowerFx.Syntax.BinaryOpNode",
+                "Microsoft.PowerFx.Syntax.BlankNode",
+                "Microsoft.PowerFx.Syntax.BoolLitNode",
+                "Microsoft.PowerFx.Syntax.CallNode",
+                "Microsoft.PowerFx.Syntax.DecLitNode",
+                "Microsoft.PowerFx.Syntax.DottedNameNode",
+                "Microsoft.PowerFx.Syntax.ErrorNode",
+                "Microsoft.PowerFx.Syntax.FirstNameNode",
+                "Microsoft.PowerFx.Syntax.Identifier",
+                "Microsoft.PowerFx.Syntax.ListNode",
+                "Microsoft.PowerFx.Syntax.NameNode",
+                "Microsoft.PowerFx.Syntax.NodeKind",
+                "Microsoft.PowerFx.Syntax.NumLitNode",
+                "Microsoft.PowerFx.Syntax.ParentNode",
+                "Microsoft.PowerFx.Syntax.RecordNode",
+                "Microsoft.PowerFx.Syntax.SelfNode",
+                "Microsoft.PowerFx.Syntax.StrInterpNode",
+                "Microsoft.PowerFx.Syntax.StrLitNode",
+                "Microsoft.PowerFx.Syntax.TableNode",
+                "Microsoft.PowerFx.Syntax.TexlNode",
+                "Microsoft.PowerFx.Syntax.UnaryOpNode",
+                "Microsoft.PowerFx.Syntax.VariadicBase",
+                "Microsoft.PowerFx.Syntax.VariadicOpNode",
+                              
+                // Visitors
+                "Microsoft.PowerFx.Syntax.IdentityTexlVisitor",
+                "Microsoft.PowerFx.Syntax.TexlFunctionalVisitor`2",
+                "Microsoft.PowerFx.Syntax.TexlVisitor",
+
+                // Power Fx Type system and Values. 
+                "Microsoft.PowerFx.Types.AggregateType",
+                "Microsoft.PowerFx.Types.BindingErrorType",
+                "Microsoft.PowerFx.Types.BlankType",
+                "Microsoft.PowerFx.Types.BlankValue",
+                "Microsoft.PowerFx.Types.BooleanType",
+                "Microsoft.PowerFx.Types.BooleanValue",
+                "Microsoft.PowerFx.Types.CollectionTableValue`1",
+                "Microsoft.PowerFx.Types.ColorType",
+                "Microsoft.PowerFx.Types.ColorValue",
+                "Microsoft.PowerFx.Types.DateTimeNoTimeZoneType",
+                "Microsoft.PowerFx.Types.DateTimeType",
+                "Microsoft.PowerFx.Types.DateTimeValue",
+                "Microsoft.PowerFx.Types.DateType",
+                "Microsoft.PowerFx.Types.DateValue",
+                "Microsoft.PowerFx.Types.DecimalType",
+                "Microsoft.PowerFx.Types.DecimalValue",
+                "Microsoft.PowerFx.Types.DeferredType",
+                "Microsoft.PowerFx.Types.DValue`1",
+                "Microsoft.PowerFx.Types.ErrorValue",
+                "Microsoft.PowerFx.Types.ExternalType",
+                "Microsoft.PowerFx.Types.ExternalTypeKind",
+                "Microsoft.PowerFx.Types.FormulaType",
+                "Microsoft.PowerFx.Types.FormulaValue",
+                "Microsoft.PowerFx.Types.GuidType",
+                "Microsoft.PowerFx.Types.GuidValue",
+                "Microsoft.PowerFx.Types.HyperlinkType",
+                "Microsoft.PowerFx.Types.ITypeVisitor",
+                "Microsoft.PowerFx.Types.IUntypedObject",
+                "Microsoft.PowerFx.Types.IValueVisitor",
+                "Microsoft.PowerFx.Types.NamedFormulaType",
+                "Microsoft.PowerFx.Types.NamedValue",
+                "Microsoft.PowerFx.Types.NumberType",
+                "Microsoft.PowerFx.Types.NumberValue",
+                "Microsoft.PowerFx.Types.OptionSetValue",
+                "Microsoft.PowerFx.Types.OptionSetValueType",
+                "Microsoft.PowerFx.Types.PrimitiveValue`1",
+                "Microsoft.PowerFx.Types.PrimitiveValueConversions",
+                "Microsoft.PowerFx.Types.RecordType",
+                "Microsoft.PowerFx.Types.RecordValue",
+                "Microsoft.PowerFx.Types.StringType",
+                "Microsoft.PowerFx.Types.StringValue",
+                "Microsoft.PowerFx.Types.TableType",
+                "Microsoft.PowerFx.Types.TableValue",
+                "Microsoft.PowerFx.Types.TimeType",
+                "Microsoft.PowerFx.Types.TimeValue",
+                "Microsoft.PowerFx.Types.UnknownType",
+                "Microsoft.PowerFx.Types.UnsupportedType",
+                "Microsoft.PowerFx.Types.UntypedObjectType",
+                "Microsoft.PowerFx.Types.UntypedObjectValue",
+                "Microsoft.PowerFx.Types.ValidFormulaValue",
+                "Microsoft.PowerFx.Types.Void",
+                "Microsoft.PowerFx.Types.VoidValue",
+                
+                // Intellisense classes. Used primarily by the Language Service Provider.
+                // Most evaluators should never need these. 
+                "Microsoft.PowerFx.Intellisense.CodeFixHandler",
+                "Microsoft.PowerFx.Intellisense.CodeFixSuggestion",
+                "Microsoft.PowerFx.Intellisense.ConnectorSuggestion",
+                "Microsoft.PowerFx.Intellisense.ConnectorSuggestions",
+                "Microsoft.PowerFx.Intellisense.IIntellisenseResult",
+                "Microsoft.PowerFx.Intellisense.IIntellisenseSuggestion",
+                "Microsoft.PowerFx.Intellisense.IntellisenseOperations",
+                "Microsoft.PowerFx.Intellisense.IPowerFxScope",
+                "Microsoft.PowerFx.Intellisense.SignatureHelp.ParameterInformation",
+                "Microsoft.PowerFx.Intellisense.SignatureHelp.SignatureHelp",
+                "Microsoft.PowerFx.Intellisense.SignatureHelp.SignatureInformation",
+                "Microsoft.PowerFx.Intellisense.SuggestionIconKind",
+                "Microsoft.PowerFx.Intellisense.SuggestionKind",                
+                "Microsoft.PowerFx.Intellisense.TokenResultType",
+                "Microsoft.PowerFx.Intellisense.UIString",
+
+                // TBD ...
+                "Microsoft.PowerFx.BasicUserInfo",
+                "Microsoft.PowerFx.Core.DisplayNameProvider",
+                "Microsoft.PowerFx.Core.DisplayNameUtility",
+                "Microsoft.PowerFx.Core.Entities.IRefreshable",
                 "Microsoft.PowerFx.Core.Localization.ErrorResourceKey",
-                "Microsoft.PowerFx.Core.Localization.Span",
-                "Microsoft.PowerFx.Core.Functions.Publish.Capabilities",
-                "Microsoft.PowerFx.Core.Functions.DLP.RequiredDataSourcePermissions",
-                "Microsoft.PowerFx.Core.Errors.DocumentErrorSeverity",
-                "Microsoft.PowerFx.Core.App.IExternalEnabledFeatures",
-                "Microsoft.PowerFx.Core.App.DefaultEnabledFeatures",
+                "Microsoft.PowerFx.Core.RenameDriver",
                 "Microsoft.PowerFx.Core.Utils.DName",
-                "Microsoft.PowerFx.Core.Utils.ICheckable",
-                "Microsoft.PowerFx.Core.NameCollisionException",
+                "Microsoft.PowerFx.Core.Utils.DPath",
+                "Microsoft.PowerFx.Core.Utils.ICheckable",                
+                "Microsoft.PowerFx.UserInfo"                
             };
 
             var sb = new StringBuilder();
@@ -109,5 +198,118 @@ namespace Microsoft.PowerFx.Core.Tests
             // Types we expect to be in the assembly are all there. 
             Assert.Empty(allowed);
         }
+
+        // No public type with TransportType attribute
+        // TransportType is special to Canvas Documents and a tool reflects over it
+        // and it's very brittle.
+        [Fact]
+        public void NoTransportInPublicTypes()
+        {
+            var exceptionList = new HashSet<string>()
+            {
+                "Microsoft.PowerFx.Syntax.Span"
+            };
+
+            var asm = typeof(Parser.TexlParser).Assembly;
+            foreach (var type in asm.GetTypes().Where(t => t.IsPublic))
+            {
+                if (exceptionList.Contains(type.FullName))
+                {
+                    continue;
+                }
+
+                var attrs = type.GetCustomAttributesData();
+
+                var hasTransport = attrs.Any(attr => attr.AttributeType.Namespace.StartsWith("Microsoft.AppMagic.Transport"));
+                Assert.False(hasTransport, $"Types '{type.FullName}' with Transport attribute shouldn't be public.");
+            }
+        }
+
+        // Assert DocumentErrorSeverity and ErrorSeverity are in sync. 
+        [Fact]
+        public void ErrorSeverityEnumsMatch()
+        {
+            var values1 = Enum.GetValues(typeof(Errors.DocumentErrorSeverity));
+            var values2 = Enum.GetValues(typeof(ErrorSeverity));
+
+            var len = values1.Length;
+            Assert.Equal(len, values2.Length);
+
+            for (var i = 0; i < len; i++)
+            {
+                var x = values1.GetValue(i);
+                var y = values1.GetValue(i);
+
+                Assert.Equal((int)x, (int)y);
+                Assert.Equal(x.ToString(), y.ToString());
+            }
+        }
+
+        [Fact]
+        public void TestTexlNodeTypes() => TestPublicClassHierarchy(typeof(TexlNode));
+
+        [Fact]
+        public void TestTokenTypes() => TestPublicClassHierarchy(typeof(Token), requireAbstractOrSealed: false);
+
+        private static void TestPublicClassHierarchy(Type rootType, bool requireAbstractOrSealed = true)
+        {
+            var errors = new StringBuilder();
+
+            var asm = rootType.Assembly;
+            var types = asm.GetTypes().Where(t => IsPublicSubclassOrEqual(t, rootType)).ToList();
+            Assert.True(types.Count > 0, "No types found");
+
+            foreach (var type in types)
+            {
+                var fullName = type.FullName;
+
+                // Should be abstract or sealed
+                if (requireAbstractOrSealed && !(type.IsSealed || type.IsAbstract))
+                {
+                    errors.AppendLine($"{fullName} is neither abstract nor sealed");
+                }
+
+                // Should have immutable attribute
+                if (type.GetCustomAttribute<ThreadSafeImmutableAttribute>() is null)
+                {
+                    errors.AppendLine($"{fullName} does not have [ThreadSafeImmutable]");
+                }
+
+                // All ctors should be internal
+                foreach (var ctor in type.GetConstructors())
+                {
+                    if (ctor.IsPublic)
+                    {
+                        errors.AppendLine($"{fullName}.{ctor.Name} constructor is public");
+                    }
+                }
+
+                // Should not have public fields
+                foreach (var field in type.GetFields())
+                {
+                    if (field.IsPublic)
+                    {
+                        errors.AppendLine($"{fullName}.{field.Name} field is public");
+                    }
+                }
+            }
+
+            Assert.True(errors.Length == 0, $"TexlNode errors: {errors}");
+        }
+
+        [Fact]
+        public static void TestImmutability()
+        {
+            var asm = typeof(Microsoft.PowerFx.Syntax.TexlNode).Assembly;
+            ImmutabilityTests.CheckImmutability(asm);
+        }
+
+        /// <summary>
+        ///     Checks whether <see cref="t1" /> is public, and equal to or subclass of to <see cref="t2" />.
+        /// </summary>
+        /// <param name="t1"></param>
+        /// <param name="t2"></param>
+        /// <returns></returns>
+        private static bool IsPublicSubclassOrEqual(Type t1, Type t2) => t1.IsPublic && (t1.Equals(t2) || t1.IsSubclassOf(t2));
     }
 }

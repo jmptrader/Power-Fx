@@ -1,115 +1,511 @@
-﻿// Value tests
->> Value(Index(ParseJson("[5]"), 1))
+// Value tests
+>> Value(Index(ParseJSON("[5]"), 1))
 5
 
->> Value(ParseJson("5"))
+>> IfError(Text(Index(ParseJSON("123"),1)),$"Kind={FirstError.Kind}")
+"Kind=25"
+
+>> Value(ParseJSON("5"))
 5
 
->> Value(ParseJson("true"))
-#Error
-
->> Value(ParseJson("false"))
-#Error
-
->> Value(ParseJson("""5"""))
-#Error
-
->> Value(ParseJson("""a"""))
-#Error
-
->> Value(ParseJson("null"))
-Blank()
-
->> Value(ParseJson("{""a"": 5}").a)
-5
-
->> Value(ParseJson("{""a"": 5, ""A"": 10}").a)
-5
-
->> Value(ParseJson("{""a"": 5, ""A"": 10}").A)
-10
-
->> Value(ParseJson("{""a"": 5}").b)
-Blank()
-
->> Value(ParseJson("""s""").a)
-#Error
-
->> Value(ParseJson("This "" Is , "" Invalid ").a)
-#Error
-
-// Text tests
->> Text(Index(ParseJson("[""s""]"), 1))
-"s"
-
->> Text(ParseJson("""s"""))
-"s"
-
->> Text(ParseJson("null"))
-""
-
->> Text(ParseJson("true"))
-#Error
-
->> Text(ParseJson("false"))
-#Error
-
->> Text(ParseJson("5"))
-#Error
-
->> Boolean(ParseJson("true"))
+>> Value(ParseJSON("5")) = Value("5")
 true
 
->> Boolean(ParseJson("false"))
+>> Value(ParseJSON("true"))
+1
+
+>> Value(ParseJSON("false"))
+0
+
+>> Value(ParseJSON("""5"""))
+5
+
+>> Value(ParseJSON("""123,456"""))
+123456
+
+>> Value(ParseJSON("""123,456"""), "fr-FR")
+123.456
+
+>> Value(ParseJSON("""123.456"""), "es-ES")
+123456
+
+>> Value(ParseJSON("123.456"), "es-ES")
+123.456
+
+>> Value(ParseJSON("""a"""))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> Value(ParseJSON("null"))
+Blank()
+
+>> Value(ParseJSON("{""a"": 5}").a)
+5
+
+>> Value(ParseJSON("{""a"": 5, ""A"": 10}").a)
+5
+
+>> Value(ParseJSON("{""a"": 5, ""A"": 10}").A)
+10
+
+>> Value(ParseJSON("{""a"": 5}").b)
+Blank()
+
+>> Value(ParseJSON("""s""").a)
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> Value(ParseJSON("This "" Is , "" Invalid ").a)
+Error({Kind:ErrorKind.InvalidArgument})
+
+// Text tests
+>> Text(Index(ParseJSON("[""s""]"), 1))
+"s"
+
+>> Text(ParseJSON("""s"""))
+"s"
+
+>> Text(ParseJSON("""s""")) = Text("s")
+true
+
+>> Text(ParseJSON("true"))
+"true"
+
+>> Text(ParseJSON("false"))
+"false"
+
+>> Text(ParseJSON("5"))
+"5"
+
+>> Boolean(ParseJSON("true"))
+true
+
+>> Boolean(ParseJSON("false"))
 false
 
->> ParseJson("{""a"": null}").a
+>> Boolean(ParseJSON("true")) = Boolean("true")
+true
+
+>> Boolean(ParseJSON("false")) = Boolean("false")
+true
+
+>> Boolean(ParseJSON("""true"""))
+true
+
+>> Boolean(ParseJSON("""false"""))
+false
+
+>> Boolean(ParseJSON("""tRuE"""))
+true
+
+>> Boolean(ParseJSON("""fAlSe"""))
+false
+
+>> Boolean(ParseJSON("""F"""))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> Boolean(ParseJSON("1"))
+true
+
+>> Boolean(ParseJSON("0"))
+false
+
+>> Boolean(ParseJSON("5"))
+true
+
+>> Boolean(ParseJSON("null"))
 Blank()
 
->> ParseJson("{""a"": null}").a.b
+>> ParseJSON("{""a"": null}").a
 Blank()
 
->> ParseJson("null").a
+>> ParseJSON("{""a"": null}").a.b
 Blank()
 
->> ParseJson("null").a.b
+>> ParseJSON("null").a
 Blank()
 
->> ParseJson("{}").a
+>> ParseJSON("null").a.b
 Blank()
 
->> ParseJson("{}").a.b
+>> ParseJSON("{}").a
 Blank()
 
->> Sum(Table(ParseJson("[1, 2, 3, 4, 5]")), Value(Value))
+>> ParseJSON("{}").a.b
+Blank()
+
+>> Sum(Table(ParseJSON("[1, 2, 3, 4, 5]")), Value(Value))
 15
 
->> ParseJson("5") + ParseJson("5")
-Errors: Error 0-14: Invalid argument type. Expecting one of the following: Number, Text, Boolean.|Error 17-31: Invalid argument type. Expecting one of the following: Number, Text, Boolean.
+>> ForAll(ParseJSON("[5, 6, 7]"), Value(ThisRecord))
+Table({Value:5},{Value:6},{Value:7})
 
->> ParseJson("5") - ParseJson("5")
-Errors: Error 17-31: Invalid argument type. Expecting one of the following: Number, Text, Boolean.|Error 0-14: Invalid argument type. Expecting one of the following: Number, Text, Boolean.
+>> ForAll(ParseJSON("5"), Value(ThisRecord))
+Error({Kind:ErrorKind.InvalidArgument})
 
->> ParseJson("5") * ParseJson("5")
-Errors: Error 0-14: Invalid argument type. Expecting one of the following: Number, Text, Boolean, Date, Time, DateTimeNoTimeZone, DateTime.|Error 17-31: Invalid argument type. Expecting one of the following: Number, Text, Boolean, Date, Time, DateTimeNoTimeZone, DateTime.
+>> ForAll(ParseJSON("5"), IfError(Value(ThisRecord), -1))
+Error({Kind:ErrorKind.InvalidArgument})
 
->> ParseJson("5") / ParseJson("5")
-Errors: Error 0-14: Invalid argument type. Expecting one of the following: Number, Text, Boolean, Date, Time, DateTimeNoTimeZone, DateTime.|Error 17-31: Invalid argument type. Expecting one of the following: Number, Text, Boolean, Date, Time, DateTimeNoTimeZone, DateTime.
+>> ForAll(ParseJSON("null"), Value(ThisRecord))
+Blank()
 
->> ParseJson("5") = ParseJson("5")
+>> ForAll(ParseJSON("[null, null, null]"), Value(ThisRecord))
+Table({Value:Blank()},{Value:Blank()},{Value:Blank()})
+
+>> ForAll(ParseJSON("[5, null, 7]"), Value(ThisRecord))
+Table({Value:5},{Value:Blank()},{Value:7})
+
+>> ForAll(ParseJSON("[""hi"", null, ""hello""]"), Text(ThisRecord))
+Table({Value:"hi"},{Value:Blank()},{Value:"hello"})
+
+>> ForAll(ParseJSON("[true, null, false]"), Boolean(ThisRecord))
+Table({Value:true},{Value:Blank()},{Value:false})
+
+>> ForAll(ParseJSON("[""2011-01-15"", null]"), Text(DateValue(ThisRecord), "yyyy-MM-dd"))
+Table({Value:"2011-01-15"},{Value:""})
+
+>> ForAll(ParseJSON("[""08:03:05.000"", null]"), Text(TimeValue(ThisRecord), "HH:mm:ss"))
+Table({Value:"08:03:05"},{Value:""})
+
+>> ForAll(ParseJSON("[""5cc45615-f759-4a53-b225-d3a2497f60ad"", null]"), GUID(ThisRecord))
+Table({Value:GUID("5cc45615-f759-4a53-b225-d3a2497f60ad")},{Value:Blank()})
+
+>> ForAll(ParseJSON("[1]"), Value(ThisRecord) / 0)
+Error({Kind:ErrorKind.Div0})
+
+>> CountRows(ForAll(ParseJSON("[1,2,3]"), Value(ThisRecord)))
+3
+
+>> Sum(ForAll(ParseJSON("[5, 6, 7]"), Value(ThisRecord)), Value)
+18
+
+>> Sum(ForAll(ParseJSON("[5, 6, 7]"), ThisRecord), Value(Value))
+18
+
+>> ForAll(ParseJSON("[1,{""a"":false},""hello""]"), IfError(Text(ThisRecord), IfError(Text(Value(ThisRecord)), Text(Boolean(ThisRecord.a)))))
+Table({Value:"1"},{Value:"false"},{Value:"hello"})
+
+>> ForAll(ParseJSON("[1,true,3,false]"), Value(ThisRecord))
+Table({Value:1},{Value:1},{Value:3},{Value:0})
+
+>> ForAll(ParseJSON("[1,2,3]"), If(Value(ThisRecord) < 2, Value(ThisRecord), ThisRecord))
+Table({Value:1},{Value:2},{Value:3})
+
+>> ForAll(ParseJSON("[1,2,3]"), ThisItem)
+Errors: Error 29-37: Name isn't valid. 'ThisItem' isn't recognized.|Error 0-38: The function 'ForAll' has some invalid arguments.
+
+>> ParseJSON("5") + ParseJSON("5")
+10
+
+>> ParseJSON("5") - ParseJSON("5")
+0
+
+>> ParseJSON("5") * ParseJSON("5")
+25
+
+>> ParseJSON("5") / ParseJSON("5")
+1
+
+>> ParseJSON("5") = ParseJSON("5")
 Errors: Error 15-16: Incompatible types for comparison. These types can't be compared: UntypedObject, UntypedObject.
 
->> ParseJson("5") > ParseJson("5")
-Errors: Error 0-14: Invalid argument type. Expecting one of the following: Number, Date, Time, DateTime.|Error 17-31: Invalid argument type. Expecting one of the following: Number, Date, Time, DateTime.
+>> ParseJSON("5") > ParseJSON("5")
+Errors: Error 15-16: This operation isn't valid on these types: UntypedObject, UntypedObject.
 
->> ParseJson("5") < ParseJson("5")
-Errors: Error 0-14: Invalid argument type. Expecting one of the following: Number, Date, Time, DateTime.|Error 17-31: Invalid argument type. Expecting one of the following: Number, Date, Time, DateTime.
+>> ParseJSON("5") < ParseJSON("5")
+Errors: Error 15-16: This operation isn't valid on these types: UntypedObject, UntypedObject.
 
->> ParseJson("5") <> ParseJson("5")
+>> ParseJSON("5") <> ParseJSON("5")
 Errors: Error 15-17: Incompatible types for comparison. These types can't be compared: UntypedObject, UntypedObject.
 
->> ParseJson("5") >= ParseJson("5")
-Errors: Error 0-14: Invalid argument type. Expecting one of the following: Number, Date, Time, DateTime.|Error 18-32: Invalid argument type. Expecting one of the following: Number, Date, Time, DateTime.
+>> ParseJSON("5") >= ParseJSON("5")
+Errors: Error 15-17: This operation isn't valid on these types: UntypedObject, UntypedObject.
 
->> ParseJson("5") <= ParseJson("5")
-Errors: Error 0-14: Invalid argument type. Expecting one of the following: Number, Date, Time, DateTime.|Error 18-32: Invalid argument type. Expecting one of the following: Number, Date, Time, DateTime.
+>> ParseJSON("5") <= ParseJSON("5")
+Errors: Error 15-17: This operation isn't valid on these types: UntypedObject, UntypedObject.
+
+>> CountRows(ParseJSON("[1, 2, 3]"))
+3
+
+>> CountRows(ParseJSON("[]"))
+0
+
+>> CountRows(ParseJSON("1"))
+Error({Kind:ErrorKind.InvalidArgument})
+
+// --- Testing heterogeneous arrays --
+
+>> Text(Index(ParseJSON("{""a"": 5, ""b"": [{""c"": 174 }, {""c"": ""foo"" }] }").b, 2).c)
+"foo"
+
+>> Value(Index(ParseJSON("{""a"": 5, ""b"": [{""c"": 19 }, {""c"": ""foo"" }] }").b, 1).c)
+19
+
+>> DateDiff(DateValue(ParseJSON("""2011-01-15""")), DateValue(ParseJSON("""2011-01-30""")))
+15
+
+>> Value(Index(ParseJSON("[1,2,3]"), If(1<0,1)))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> DateValue(ParseJSON("""2011-1-15"""))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> DateValue(ParseJSON("""2011-01"""))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> DateValue(ParseJSON("""2011"""))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> DateValue(ParseJSON("null"))
+Blank()
+
+>> DateValue(ParseJSON("""abcdef"""))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> DateDiff(DateTimeValue(ParseJSON("""2011-01-15T08:00:00.000Z""")), DateTimeValue(ParseJSON("""2011-01-30T08:00:00.000Z""")))
+15
+
+>> DateDiff(DateTimeValue(ParseJSON("""2011-01-15T08:00:00Z""")), DateTimeValue(ParseJSON("""2011-01-30T08:00:00Z""")))
+15
+
+>> DateDiff(DateTimeValue(ParseJSON("""2011-01-15T08:00:00.000""")), DateTimeValue(ParseJSON("""2011-01-30T08:00:00.000""")))
+15
+
+>> DateDiff(DateTimeValue(ParseJSON("""2011-01-15T00:00:00""")), DateTimeValue(ParseJSON("""2011-01-30""")))
+15
+
+>> DateTimeValue(ParseJSON("""2011-01-15T08:0:00.000Z"""))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> DateTimeValue(ParseJSON("""2011-01-15T08"""))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> DateTimeValue(ParseJSON("""2011T08:00:00.000Z"""))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> DateTimeValue(ParseJSON("""2011-01-15T08:00:00.000Z""")) = DateTimeValue("2011-01-15T08:00:00.000Z")
+true
+
+>> DateTimeValue(ParseJSON("null"))
+Blank()
+
+>> DateTimeValue(ParseJSON("""abcdef"""))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> Text(DateTimeValue(ParseJSON("""2022-05-05""")), "yyyy-MM-dd HH:mm:ss")
+"2022-05-05 00:00:00"
+
+>> DateDiff(DateValue(ParseJSON("""2011-01-15T08:00:00.000Z""")), DateValue(ParseJSON("""2011-01-30T08:00:00.000Z""")))
+15
+
+>> DateDiff(DateValue(ParseJSON("""2011-01-15T08:00:00Z""")), DateValue(ParseJSON("""2011-01-30T08:00:00Z""")))
+15
+
+>> DateDiff(DateValue(ParseJSON("""2011-01-15T00:00:00""")), DateValue(ParseJSON("""2011-01-30""")))
+15
+
+>> DateDiff(DateValue(ParseJSON("""2011-01-15T08:00:00.000""")), DateValue(ParseJSON("""2011-01-30T08:00:00.000""")))
+15
+
+>> DateValue(ParseJSON("""2011-01-15T08:00:00.000""")) = DateValue("2011-01-15T08:00:00.000")
+true
+
+>> Text(TimeValue(ParseJSON("""08:03:05.000""")), "HH:mm:ss")
+"08:03:05"
+
+>> TimeValue(ParseJSON("""08:03:05.000""")) = TimeValue("08:03:05.000")
+true
+
+>> TimeValue(ParseJSON("""08:93:05.000"""))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> TimeValue(ParseJSON("null"))
+Blank()
+
+>> TimeValue(ParseJSON("""abcdef"""))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> GUID(ParseJSON("""5cc45615-f759-4a53-b225-d3a2497f60ad"""))
+GUID("5cc45615-f759-4a53-b225-d3a2497f60ad")
+
+>> GUID(ParseJSON("""5cc45615-f759-4a53-b225-d3a2497f60ad""")) = GUID("5cc45615-f759-4a53-b225-d3a2497f60ad")
+true
+
+>> GUID(ParseJSON("null"))
+Blank()
+
+// heterogeneous/ mixed-type arrays
+>> Value(Index(ParseJSON("[ { ""a"" : 10 }, { ""b"" : ""str"" } ]"),1).a)
+10
+
+>> Value(Index(ParseJSON("[ { ""a"" : 10 }, { ""b"" : ""str"" } ]"),1).b)
+Blank()
+
+>> Text(Index(ParseJSON("[ { ""a"" : 10 }, { ""b"" : ""str"" } ]"),2).b)
+"str"
+
+>> Text(Index(ParseJSON("[ { ""a"" : 10 }, { ""b"" : ""str"" } ]"),2).a)
+Blank()
+
+>> ColorValue(ParseJSON("""#01020304"""))
+RGBA(1,2,3,0.016)
+
+>> ColorValue(ParseJSON("""#010203"""))
+RGBA(1,2,3,1)
+
+>> ColorValue(ParseJSON("""#010203""")) = ColorValue("#010203")
+true
+
+>> ColorValue(ParseJSON("""Red"""))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> ColorValue(ParseJSON("""#RRGGBBAA"""))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> ColorValue(ParseJSON("""#000000ZZ"""))
+Error({Kind:ErrorKind.InvalidArgument})
+
+>> ColorValue(ParseJSON("null"))
+Blank()
+
+>> DateTimeValue(ParseJSON("""2011-01-30T08:00:00.000"""))
+DateTime(2011,1,30,8,0,0,0)
+
+>> DateTimeValue(ParseJSON("""2011-01-30T08:00:00.0005"""))
+DateTime(2011,1,30,8,0,0,0)
+
+>> DateTimeValue(ParseJSON("""2011-01-30T08:00:00.1234567"""))
+DateTime(2011,1,30,8,0,0,123)
+
+>> TimeValue(ParseJSON("""11:12:00.000"""))
+Time(11,12,0,0)
+
+>> TimeValue(ParseJSON("""11:12:00"""))
+Time(11,12,0,0)
+
+>> TimeValue(ParseJSON("""11:12:00.1234567"""))
+Time(11,12,0,123)
+
+>> IsBlank(ParseJSON("{""a"":null,""b"":""""}").a)
+true
+
+>> IsBlank(ParseJSON("{""a"":null,""b"":""""}").b)
+true
+
+>> IsBlank(ParseJSON("{""a"":null,""b"":""""}").c)
+true
+
+>> Text(ParseJSON("{""a"":null,""b"":""""}").a) = Blank()
+true
+
+>> Text(ParseJSON("{""a"":null,""b"":""""}").b) = Blank()
+false
+
+>> Text(ParseJSON("{""a"":null,""b"":""""}").c) = Blank()
+true
+
+>> Value(First(ParseJSON("[1, 2, 3, 4]")))
+1
+
+>> Value(First(ParseJSON("[1, 2, 3, 4]"))) = First([1, 2, 3, 4]).Value
+true
+
+>> Value(Last(ParseJSON("[1, 2, 3, 4]")))
+4
+
+>> Value(Last(ParseJSON("[1, 2, 3, 4]"))) = Last([1, 2, 3, 4]).Value
+true
+
+>> Value(Last(FirstN(ParseJSON("[1, 2, 3, 4]"), 2)))
+2
+
+>> Value(Last(FirstN(ParseJSON("[1, 2, 3, 4]"), 2))) = Last(FirstN([1, 2, 3, 4], 2)).Value
+true
+
+>> Value(First(LastN(ParseJSON("[1, 2, 3, 4]"), 2)))
+3
+
+>> Value(First(LastN(ParseJSON("[1, 2, 3, 4]"), 2))) = First(LastN([1, 2, 3, 4], 2)).Value
+true
+
+>> Value(First(FirstN(ParseJSON("[1, 2, 3, 4]"), 2)))
+1
+
+>> Value(First(FirstN(ParseJSON("[1, 2, 3, 4]"), 2))) = First(FirstN([1, 2, 3, 4], 2)).Value
+true
+
+>> Value(Last(LastN(ParseJSON("[1, 2, 3, 4]"), 2)))
+4
+
+>> Value(Last(LastN(ParseJSON("[1, 2, 3, 4]"), 2))) = Last(LastN([1, 2, 3, 4], 2)).Value
+true
+
+>> CountRows(FirstN(ParseJSON("[1, 2, 3, 4]"), 2))
+2
+
+>> CountRows(FirstN(ParseJSON("[1, 2, 3, 4]"), 2)) = CountRows(FirstN([1, 2, 3, 4], 2))
+true
+
+>> CountRows(LastN(ParseJSON("[1, 2, 3, 4]"), 2))
+2
+
+>> CountRows(LastN(ParseJSON("[1, 2, 3, 4]"), 2)) = CountRows(LastN([1, 2, 3, 4], 2))
+true
+
+>> CountRows(FirstN(ParseJSON("[1, 2, 3, 4]"), 5))
+4
+
+>> CountRows(FirstN(ParseJSON("[1, 2, 3, 4]"), 5)) = CountRows(FirstN([1, 2, 3, 4], 5))
+true
+
+>> CountRows(LastN(ParseJSON("[1, 2, 3, 4]"), 5))
+4
+
+>> CountRows(LastN(ParseJSON("[1, 2, 3, 4]"), 5)) = CountRows(LastN([1, 2, 3, 4], 5))
+true
+
+>> First(ParseJSON("[]"))
+Blank()
+
+>> Last(ParseJSON("[]"))
+Blank()
+
+>> CountRows(FirstN(ParseJSON("[]"), 1))
+0
+
+>> CountRows(LastN(ParseJSON("[]"), 1))
+0
+
+>> CountRows(FirstN(ParseJSON("[1, 2, 3, 4]"), "3"))
+3
+
+>> CountRows(LastN(ParseJSON("[1, 2, 3, 4]"), "3"))
+3
+
+>> Value(Index(ParseJSON("[1,2,3,4]"), "2")) // Coercion from string
+2
+
+>> Text(Index(ParseJSON("[""one"",""two"",""three""]"),true)) // Coercion from boolean
+"one"
+
+>> Boolean(IfError(ParseJSON("{""field1"":true}").field1, ParseJSON("false")))
+true
+
+>> Text(ParseJSON("1.234"), "#.##")
+"1.23"
+
+>> Text(ParseJSON("1.234"), "#.##", "fr-fr")
+"1,23"
+
+>> Text(ParseJSON("null"), "#.##")
+""
+
+>> Text(ParseJSON("null"), "#.##", "fr-fr")
+""
+
+>> Text(ParseJSON("1.234"), Blank())
+""
+
+>> Text(ParseJSON("1.234"), "#.##", Blank())
+""
+
+>> Text(ParseJSON("null"))
+Blank()

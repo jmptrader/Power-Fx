@@ -2,42 +2,46 @@
 // Licensed under the MIT license.
 
 using System.Linq;
-using Microsoft.PowerFx.Core.Lexer.Tokens;
 using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Syntax.SourceInformation;
-using Microsoft.PowerFx.Core.Syntax.Visitors;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax.SourceInformation;
 
-namespace Microsoft.PowerFx.Core.Syntax.Nodes
+namespace Microsoft.PowerFx.Syntax
 {
-    // Base class for all parse nodes.
-    internal abstract class TexlNode
+    /// <summary>
+    /// Base class for all parse nodes.
+    /// </summary>
+    [ThreadSafeImmutable]
+    public abstract class TexlNode
     {
         private TexlNode _parent;
         private bool? _usesChains;
-        protected int _depth;
+        private protected int _depth;
 
-        public readonly int Id;
+        internal readonly int Id;
 
-        public int MinChildID { get; protected set; }
+        internal int MinChildID { get; private protected set; }
 
-        public readonly Token Token;
+        internal readonly Token Token;
 
-        public SourceList SourceList { get; private set; }
+        internal SourceList SourceList { get; private set; }
 
-        public int Depth => _depth;
+        internal int Depth => _depth;
 
+        /// <summary>
+        /// Parent <see cref="TexlNode" /> in the AST structure (if any).
+        /// </summary>
         public TexlNode Parent
         {
             get => _parent;
-            set
+            internal set
             {
                 Contracts.Assert(_parent == null);
                 _parent = value;
             }
         }
 
-        public bool UsesChains
+        internal bool UsesChains
         {
             get
             {
@@ -51,7 +55,7 @@ namespace Microsoft.PowerFx.Core.Syntax.Nodes
             }
         }
 
-        protected TexlNode(ref int idNext, Token primaryToken, SourceList sourceList)
+        private protected TexlNode(ref int idNext, Token primaryToken, SourceList sourceList)
         {
             Contracts.Assert(idNext >= 0);
             Contracts.AssertValue(primaryToken);
@@ -64,30 +68,51 @@ namespace Microsoft.PowerFx.Core.Syntax.Nodes
             _depth = 1;
         }
 
-        public abstract TexlNode Clone(ref int idNext, Span ts);
+        internal abstract TexlNode Clone(ref int idNext, Span ts);
 
+        /// <summary>
+        /// Accept a visitor <see cref="TexlVisitor" />.
+        /// </summary>
+        /// <param name="visitor">The visitor to accept.</param>
         public abstract void Accept(TexlVisitor visitor);
 
+        /// <summary>
+        /// Accept a functional visitor <see cref="TexlFunctionalVisitor{TResult, TContext}" />.
+        /// </summary>
+        /// <typeparam name="TResult">The result type of the visitor.</typeparam>
+        /// <typeparam name="TContext">The context type of the visitor.</typeparam>
+        /// <param name="visitor">The functional visitor to accept.</param>
+        /// <param name="context">The context to pass to the visitor.</param>
+        /// <returns>The result of the visitor.</returns>
         public abstract TResult Accept<TResult, TContext>(TexlFunctionalVisitor<TResult, TContext> visitor, TContext context);
 
+        /// <summary>
+        /// Kind of the parse node.
+        /// </summary>
         public abstract NodeKind Kind { get; }
 
-        public void Parser_SetSourceList(SourceList sources)
+        internal void Parser_SetSourceList(SourceList sources)
         {
             Contracts.AssertValue(sources);
             SourceList = sources;
         }
 
+        // TODO: Comment - what are the differences between different spans defined here?
+        // TODO: Should we keep this internal?
         public virtual Span GetTextSpan()
         {
             return new Span(Token.VerifyValue().Span.Min, Token.VerifyValue().Span.Lim);
         }
 
+        // TODO: Comment - what are the differences between different spans defined here?
+        // TODO: Should we keep this internal?
         public virtual Span GetCompleteSpan()
         {
             return new Span(GetTextSpan());
         }
 
+        // TODO: Comment - what are the differences between different spans defined here?
+        // TODO: Should we keep this internal?
         public Span GetSourceBasedSpan()
         {
             if (SourceList.Tokens.Count() == 0)
@@ -100,162 +125,163 @@ namespace Microsoft.PowerFx.Core.Syntax.Nodes
             return new Span(start, end);
         }
 
-        public virtual ErrorNode AsError()
+        internal virtual ErrorNode AsError()
         {
             return null;
         }
 
-        public virtual FirstNameNode CastFirstName()
+        internal virtual FirstNameNode CastFirstName()
         {
             Contracts.Assert(false);
             return (FirstNameNode)this;
         }
 
-        public virtual FirstNameNode AsFirstName()
+        internal virtual FirstNameNode AsFirstName()
         {
             return null;
         }
 
-        public virtual ParentNode AsParent()
+        internal virtual ParentNode AsParent()
         {
             return null;
         }
 
-        public virtual ReplaceableNode AsReplaceable()
+        internal virtual SelfNode AsSelf()
         {
             return null;
         }
 
-        public virtual SelfNode AsSelf()
-        {
-            return null;
-        }
-
-        public virtual DottedNameNode CastDottedName()
+        internal virtual DottedNameNode CastDottedName()
         {
             Contracts.Assert(false);
             return (DottedNameNode)this;
         }
 
-        public virtual DottedNameNode AsDottedName()
+        internal virtual DottedNameNode AsDottedName()
         {
             return null;
         }
 
-        public virtual NumLitNode AsNumLit()
+        internal virtual NumLitNode AsNumLit()
         {
             return null;
         }
 
-        public virtual StrLitNode AsStrLit()
+        internal virtual DecLitNode AsDecLit()
         {
             return null;
         }
 
-        public virtual StrInterpNode AsStrInterp()
+        internal virtual StrLitNode AsStrLit()
         {
             return null;
         }
 
-        public virtual BoolLitNode CastBoolLit()
+        internal virtual StrInterpNode AsStrInterp()
+        {
+            return null;
+        }
+
+        internal virtual BoolLitNode CastBoolLit()
         {
             Contracts.Assert(false);
             return (BoolLitNode)this;
         }
 
-        public virtual BoolLitNode AsBoolLit()
+        internal virtual BoolLitNode AsBoolLit()
         {
             return null;
         }
 
-        public virtual UnaryOpNode CastUnaryOp()
+        internal virtual UnaryOpNode CastUnaryOp()
         {
             Contracts.Assert(false);
             return (UnaryOpNode)this;
         }
 
-        public virtual UnaryOpNode AsUnaryOpLit()
+        internal virtual UnaryOpNode AsUnaryOpLit()
         {
             return null;
         }
 
-        public virtual BinaryOpNode CastBinaryOp()
+        internal virtual BinaryOpNode CastBinaryOp()
         {
             Contracts.Assert(false);
             return (BinaryOpNode)this;
         }
 
-        public virtual BinaryOpNode AsBinaryOp()
+        internal virtual BinaryOpNode AsBinaryOp()
         {
             return null;
         }
 
-        public virtual VariadicOpNode AsVariadicOp()
+        internal virtual VariadicOpNode AsVariadicOp()
         {
             return null;
         }
 
-        public virtual ListNode CastList()
+        internal virtual ListNode CastList()
         {
             Contracts.Assert(false);
             return (ListNode)this;
         }
 
-        public virtual ListNode AsList()
+        internal virtual ListNode AsList()
         {
             return null;
         }
 
-        public virtual CallNode CastCall()
+        internal virtual CallNode CastCall()
         {
             Contracts.Assert(false);
             return (CallNode)this;
         }
 
-        public virtual CallNode AsCall()
+        internal virtual CallNode AsCall()
         {
             return null;
         }
 
-        public virtual RecordNode CastRecord()
+        internal virtual RecordNode CastRecord()
         {
             Contracts.Assert(false);
             return (RecordNode)this;
         }
 
-        public virtual RecordNode AsRecord()
+        internal virtual RecordNode AsRecord()
         {
             return null;
         }
 
-        public virtual TableNode AsTable()
+        internal virtual TableNode AsTable()
         {
             return null;
         }
 
-        public virtual BlankNode AsBlank()
+        internal virtual BlankNode AsBlank()
         {
             return null;
         }
 
-        public virtual AsNode AsAsNode()
+        internal virtual AsNode AsAsNode()
         {
             return null;
         }
 
-        public bool InTree(TexlNode root)
+        internal bool InTree(TexlNode root)
         {
             Contracts.AssertValue(root);
             return root.MinChildID <= Id && Id <= root.Id;
         }
 
+        /// <inheritdoc />
         public override string ToString()
         {
             return TexlPretty.PrettyPrint(this);
         }
 
         // Returns the nearest node to the cursor position. If the node has child nodes returns the nearest child node.
-        public static TexlNode FindNode(TexlNode rootNode, int cursorPosition)
+        internal static TexlNode FindNode(TexlNode rootNode, int cursorPosition)
         {
             Contracts.AssertValue(rootNode);
             Contracts.Assert(cursorPosition >= 0);

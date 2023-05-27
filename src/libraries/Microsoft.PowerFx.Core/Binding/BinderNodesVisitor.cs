@@ -2,11 +2,8 @@
 // Licensed under the MIT license.
 
 using System.Collections.Generic;
-using Microsoft.PowerFx.Core.Lexer;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
-using Microsoft.PowerFx.Core.Syntax.Visitors;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
 namespace Microsoft.PowerFx.Core.Binding
 {
@@ -34,6 +31,10 @@ namespace Microsoft.PowerFx.Core.Binding
 
         private readonly List<StrLitNode> _stringLiterals;
 
+        public IEnumerable<DecLitNode> DecimalLiterals => _decimalLiterals;
+
+        private readonly List<DecLitNode> _decimalLiterals;
+
         public IEnumerable<StrLitNode> StringLiterals => _stringLiterals;
 
         private readonly HashSet<NodeKind> _keywords;
@@ -54,6 +55,7 @@ namespace Microsoft.PowerFx.Core.Binding
             _stringInterpolations = new List<StrInterpNode>();
             _booleanLiterals = new List<BoolLitNode>();
             _numericLiterals = new List<NumLitNode>();
+            _decimalLiterals = new List<DecLitNode>();
             _stringLiterals = new List<StrLitNode>();
             _keywords = new HashSet<NodeKind>();
             _unaryOperators = new List<UnaryOpNode>();
@@ -96,6 +98,12 @@ namespace Microsoft.PowerFx.Core.Binding
         {
             Contracts.AssertValue(node);
             _numericLiterals.Add(node);
+        }
+
+        public override void Visit(DecLitNode node)
+        {
+            Contracts.AssertValue(node);
+            _decimalLiterals.Add(node);
         }
 
         public override void Visit(StrLitNode node)

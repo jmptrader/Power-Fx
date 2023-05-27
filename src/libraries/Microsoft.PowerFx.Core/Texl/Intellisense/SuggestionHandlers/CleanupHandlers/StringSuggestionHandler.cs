@@ -2,10 +2,12 @@
 // Licensed under the MIT license.
 
 using System.Collections.Generic;
-using Microsoft.PowerFx.Core.Lexer;
+using System.Globalization;
+using Microsoft.PowerFx.Core.Texl.Intellisense;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
-namespace Microsoft.PowerFx.Core.Texl.Intellisense
+namespace Microsoft.PowerFx.Intellisense
 {
     internal sealed class StringSuggestionHandler : ISpecialCaseHandler
     {
@@ -56,7 +58,9 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
                     if (script[i] != suggestion.Text[j])
                     {
                         var curChar = script.Substring(i, 1);
-                        if (curChar != TexlLexer.PunctuatorParenClose && curChar != TexlLexer.LocalizedInstance.LocalizedPunctuatorListSeparator)
+
+                        // $$$ can't use current culture
+                        if (curChar != TexlLexer.PunctuatorParenClose && curChar != TexlLexer.GetLocalizedInstance(CultureInfo.CurrentCulture).LocalizedPunctuatorListSeparator)
                         {
                             found = false;
                         }

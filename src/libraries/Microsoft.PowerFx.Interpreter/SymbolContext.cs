@@ -3,7 +3,7 @@
 
 using System.Collections.Generic;
 using Microsoft.PowerFx.Core.IR.Symbols;
-using Microsoft.PowerFx.Core.Public.Values;
+using Microsoft.PowerFx.Types;
 
 namespace Microsoft.PowerFx
 {
@@ -30,9 +30,11 @@ namespace Microsoft.PowerFx
             return new SymbolContext(null, new Dictionary<int, IScope>());
         }
 
+        // Creates a top scope that pairs the values from ruleScope with 
+        // the scope topScope. topScope was created by IR. 
         public static SymbolContext NewTopScope(ScopeSymbol topScope, RecordValue ruleScope)
         {
-            return new SymbolContext(topScope, new Dictionary<int, IScope>() { { topScope.Id, new RecordScope(ruleScope) } });
+            return new SymbolContext(topScope, new Dictionary<int, IScope>() { { topScope.Id, new FormulaValueScope(ruleScope) } });
         }
 
         public SymbolContext WithScope(ScopeSymbol currentScope)
@@ -49,11 +51,12 @@ namespace Microsoft.PowerFx
             return new SymbolContext(CurrentScope, newScopeValues);
         }
 
-        public SymbolContext WithScopeValues(RecordValue scopeValues)
+        public SymbolContext WithScopeValues(FormulaValue value)
         {
-            return WithScopeValues(new RecordScope(scopeValues));
+            return WithScopeValues(new FormulaValueScope(value));
         }
 
+        // Called by evaluator to fetch a runtime value in the given scope. 
         public FormulaValue GetScopeVar(ScopeSymbol scope, string name)
         {
             var record = ScopeValues[scope.Id];

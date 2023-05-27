@@ -10,10 +10,8 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
     // Sum(arg1:n, arg2:n, ..., argN:n)
     internal sealed class SumFunction : StatisticalFunction
     {
-        public override bool RequiresErrorContext => true;
-
         public SumFunction()
-            : base("Sum", TexlStrings.AboutSum, FunctionCategories.MathAndStat)
+            : base("Sum", TexlStrings.AboutSum, FunctionCategories.MathAndStat, nativeDecimal: true)
         {
         }
     }
@@ -22,12 +20,10 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
     // Corresponding DAX functions: Sum, SumX
     internal sealed class SumTableFunction : StatisticalTableFunction
     {
-        public override bool RequiresErrorContext => true;
-
         public override DelegationCapability FunctionDelegationCapability => DelegationCapability.Sum;
 
         public SumTableFunction()
-            : base("Sum", TexlStrings.AboutSumT, FunctionCategories.Table)
+            : base("Sum", TexlStrings.AboutSumT, FunctionCategories.Table, nativeDecimal: true)
         {
         }
     }

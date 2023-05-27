@@ -33,8 +33,6 @@ namespace Microsoft.PowerFx.Core.Binding
         /// <summary>
         /// STOP. Only use this if you are 100% clear on what you're doing
         /// This bindkind is not valid in documents loaded after V1_287
-        /// <seealso cref="AppMagic.Persistence.Converters.ConversionTemplateFromV1_286"/>
-        /// <seealso cref="DocumentProperties.SupportsImplicitThisItem"/>
         /// </summary>
         DeprecatedImplicitThisItem,
 
@@ -74,6 +72,11 @@ namespace Microsoft.PowerFx.Core.Binding
 
         // Global namespace, only used with fully qualified values
         QualifiedValue,
+
+        /// <summary>
+        /// This BindKind applies to resolved Type Names, and is not used for any data.
+        /// </summary>
+        TypeName,
 
         Lim
     }

@@ -1,7 +1,9 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Microsoft.PowerFx.Core.Utils;
 
@@ -9,7 +11,7 @@ namespace Microsoft.PowerFx.Core.Types.Enums
 {
     internal static class ColorTable
     {
-        public static Dictionary<string, uint> InvariantNameToHexMap { get; } = new Dictionary<string, uint>
+        public static IReadOnlyDictionary<string, uint> InvariantNameToHexMap { get; } = new Dictionary<string, uint>(StringComparer.InvariantCultureIgnoreCase)
         {
                 { "AliceBlue", 0xFFF0F8FF }, { "AntiqueWhite", 0xFFFAEBD7 }, { "Aqua", 0xFF00FFFF }, { "Aquamarine", 0xFF7FFFD4 }, { "Azure", 0xFFF0FFFF }, { "Beige", 0xFFF5F5DC }, { "Bisque", 0xFFFFE4C4 },
                 { "Black", 0xFF000000 }, { "BlanchedAlmond", 0xFFFFEBCD }, { "Blue", 0xFF0000FF }, { "BlueViolet", 0xFF8A2BE2 }, { "Brown", 0xFFA52A2A }, { "BurlyWood", 0xFFDEB887 }, { "CadetBlue", 0xFF5F9EA0 },
@@ -37,7 +39,7 @@ namespace Microsoft.PowerFx.Core.Types.Enums
         {
             Contracts.Assert(InvariantNameToHexMap.All(x => !CharacterUtils.HasSpaces(x.Key)));
 
-            var colorText = string.Join(", ", InvariantNameToHexMap.Select(x => x.Key + ":#" + string.Format("{0:X6}", x.Value)));
+            var colorText = string.Join(", ", InvariantNameToHexMap.Select(x => x.Key + ":#" + string.Format(CultureInfo.InvariantCulture, "{0:X6}", x.Value)));
             return "%c[" + colorText + "]";
         }
     }

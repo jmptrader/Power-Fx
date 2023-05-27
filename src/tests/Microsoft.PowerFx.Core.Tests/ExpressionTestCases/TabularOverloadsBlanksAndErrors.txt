@@ -1,0 +1,261 @@
+#SETUP: ConsistentOneColumnTableResult
+
+// *********** Single-argument functions ***********
+
+>> Abs(If(1/0<2,[1]))
+Error({Kind:ErrorKind.Div0})
+
+>> Abs(If(1<0,[1]))
+Blank()
+
+>> Abs(Filter([1,2,3], Value > 10))
+Table()
+
+>> Boolean(If(1/0<2,["true"]))
+Error({Kind:ErrorKind.Div0})
+
+>> Boolean(If(1<0,["true"]))
+Blank()
+
+>> Boolean(Filter(["true","false"], Len(Value) > 10))
+Table()
+
+>> Boolean(If(1/0<2,[1]))
+#SKIP: Boolean support for decimal not done yet, expected: Error({Kind:ErrorKind.Div0})
+
+>> Boolean(If(1<0,[1]))
+#SKIP: Boolean support for decimal not done yet, expected: Blank()
+
+>> Boolean(Filter([1,2,3], Value > 10))
+#SKIP: Boolean support for decimal not done yet, expected: Table()
+
+>> Char(If(1/0<2,[61]))
+Error({Kind:ErrorKind.Div0})
+
+>> Char(If(1<0,[61]))
+Blank()
+
+>> Char(Filter([61,62,63], Value > 100))
+Table()
+
+>> Exp(If(1/0<2,[1]))
+Error({Kind:ErrorKind.Div0})
+
+>> Exp(If(1<0,[1]))
+Blank()
+
+>> Exp(Filter([1,2,3], Value > 10))
+Table()
+
+>> Int(If(1/0<2,[1]))
+Error({Kind:ErrorKind.Div0})
+
+>> Int(If(1<0,[1]))
+Blank()
+
+>> Int(Filter([1,2,3], Value > 10))
+Table()
+
+>> Len(If(1/0<2,["true"]))
+Error({Kind:ErrorKind.Div0})
+
+>> Len(If(1<0,["true"]))
+Blank()
+
+>> Len(Filter(["true","false"], Len(Value) > 10))
+Table()
+
+>> Ln(If(1/0<2,[1]))
+Error({Kind:ErrorKind.Div0})
+
+>> Ln(If(1<0,[1]))
+Blank()
+
+>> Ln(Filter([1,2,3], Value > 10))
+Table()
+
+>> Sqrt(If(1/0<2,[1]))
+Error({Kind:ErrorKind.Div0})
+
+>> Sqrt(If(1<0,[1]))
+Blank()
+
+>> Sqrt(Filter([1,2,3], Value > 10))
+Table()
+
+// *********** 2+-argument functions, errors ***********
+
+>> Concatenate(If(1/0<2,["hello", "hi"]), " world")
+Error({Kind:ErrorKind.Div0})
+
+>> Concatenate("hello ", If(Sqrt(-1)<0,["world", "day"]))
+Error({Kind:ErrorKind.Numeric})
+
+>> Find(If(1/0<2,["hello", "hi"]), " world")
+Error({Kind:ErrorKind.Div0})
+
+>> Find("a", If(Sqrt(-1)<0,["world", "day"]))
+Error({Kind:ErrorKind.Numeric})
+
+>> Round(If(1/0<2,[12.34, 56.78]), 1)
+Error({Kind:ErrorKind.Div0})
+
+>> Round(1234.5678, If(Sqrt(-1)<0,[1, 2, 3]))
+Error({Kind:ErrorKind.Numeric})
+
+>> Round([12.34, 56.78], 1/0)
+Table({Value:Error({Kind:ErrorKind.Div0})},{Value:Error({Kind:ErrorKind.Div0})})
+
+>> Round([123.456, 234.567], [1, 2, 3])
+Table({Value:123.5},{Value:234.57},{Value:Error({Kind:ErrorKind.NotApplicable})})
+
+>> Concat(Round([12.34, 56.78], 1/0), IfError(Text(Value), $"Error({{Kind:{FirstError.Kind}}})"), ", ")
+"Error({Kind:13}), Error({Kind:13})"
+
+>> Concat(Round([123.456, 234.567], [1, 2, 3]), IfError(Text(Value), $"Error({{Kind:{FirstError.Kind}}})"), ", ")
+"123.5, 234.57, Error({Kind:27})"
+
+// *********** 2+-argument functions, blanks ***********
+
+>> Concatenate(If(1<0,["hello", "hi"]), " world")
+Blank()
+
+>> Concatenate("hello ", If(1<0,["world", "day"]))
+Blank()
+
+>> Find(If(1<0,["hello", "hi"]), " world")
+Blank()
+
+>> Find("a", If(1<0,["world", "day"]))
+Blank()
+
+>> Round(If(1<0,[12.34, 56.78]), 1)
+Blank()
+
+>> Round(1234.5678, If(1<0,[1, 2, 3]))
+Blank()
+
+>> Round([12.34, 56.78], If(1<0,1))
+Table({Value:12},{Value:57})
+
+// *********** 2+-argument functions, empty tables ***********
+
+>> Concatenate(Filter(["hello", "hi"], Len(Value)>10), " world")
+Table()
+
+>> Concatenate("hello ", Filter(["world", "day"],Len(Value)>10))
+Table()
+
+>> Find(Filter(["hello", "hi"], Len(Value)>10), " world")
+Table()
+
+>> Find("a", Filter(["world", "day"],Len(Value)>10))
+Table()
+
+>> Round(Filter([12.34, 56.78], Value > 100), 1)
+Table()
+
+>> Round(1234.5678, Filter([1, 2, 3], Value > 10))
+Table()
+
+>> Concatenate(Filter(["a","b"], Len(Value)>10), If(1<0,["abcdef", "ghijkl"]))
+Blank()
+
+>> Find(If(1<0,["a","b"]), Filter(["abcdef", "ghijkl"], Len(Value)>10))
+Blank()
+
+>> Concatenate(["a","b"], If(1/0<2,["abcdef", "ghijkl"]))
+Error({Kind:ErrorKind.Div0})
+
+>> Find(If(1/0<2,["a","b"]), ["abcdef", "ghijkl"])
+Error({Kind:ErrorKind.Div0})
+
+>> Concatenate(["a","b"], If(1<0,["abcdef", "ghijkl"]))
+Blank()
+
+>> Find(If(1<0,["a","b"]), ["abcdef", "ghijkl"])
+Blank()
+
+>> Concatenate(If(1<0,["a","b"]), If(1/0<2,["abcdef", "ghijkl"]))
+Blank()
+
+>> Concatenate( If(Sqrt(-1)<0,["Hi", "hello"]), If(1/0<2, " world") )
+Error({Kind:ErrorKind.Numeric})
+
+>> Concatenate( If(Sqrt(-1)<0,"Hello"), If(1/0<2, [" world", "people"]) )
+Error({Kind:ErrorKind.Div0})
+
+>> Concatenate( If(Sqrt(-1)<0,["Hi", "hello"]), If(1/0<2, [" world", "people"]) )
+Error({Kind:ErrorKind.Numeric})
+
+>> Concatenate(Filter([1,2], Value<>Value), If(1/0<0, "test"))
+Table()
+
+>> Concatenate(["hello", "hi"], If(1/0<2," world"))
+Table({Value:Error({Kind:ErrorKind.Div0})},{Value:Error({Kind:ErrorKind.Div0})})
+
+>> Concatenate(Char(0), ["hello", "great", "world"])
+Table({Value:Error({Kind:ErrorKind.InvalidArgument})},{Value:Error({Kind:ErrorKind.InvalidArgument})},{Value:Error({Kind:ErrorKind.InvalidArgument})})
+
+>> Concatenate(["hello", "hi"], " ", ["John", "Jane", "Jim", "Joan"])
+Table({Value:"hello John"},{Value:"hi Jane"},{Value:Error({Kind:ErrorKind.NotApplicable})},{Value:Error({Kind:ErrorKind.NotApplicable})})
+
+>> Concat(Concatenate(["one", "two"], Text(1/0)), IfError(Value, $"Error({{Kind:{FirstError.Kind}}})"), ", ")
+"Error({Kind:13}), Error({Kind:13})"
+
+>> Concat(Concatenate(Char(0), ["hello", "great", "world"]), IfError(Value, $"Error({{Kind:{FirstError.Kind}}})"), ", ")
+"Error({Kind:25}), Error({Kind:25}), Error({Kind:25})"
+
+>> Concat(Concatenate(["hello", "hi"], " ", ["John", "Jane", "Jim", "Joan"]), IfError(Value, $"Error({{Kind:{FirstError.Kind}}})"), ", ")
+"hello John, hi Jane, Error({Kind:27}), Error({Kind:27})"
+
+>> Find(["a", "b"], If(1/0<2,"abcdefg"))
+Table({Value:Error({Kind:ErrorKind.Div0})},{Value:Error({Kind:ErrorKind.Div0})})
+
+>> Find(Char(0), ["hello", "great", "world"])
+Table({Value:Error({Kind:ErrorKind.InvalidArgument})},{Value:Error({Kind:ErrorKind.InvalidArgument})},{Value:Error({Kind:ErrorKind.InvalidArgument})})
+
+>> Find(["a", "b", "c"], "The quick brown fox jumped over the lazy dog", [1, 2, 3, 4, 5])
+Table({Value:38},{Value:11},{Value:8},{Value:Error({Kind:ErrorKind.NotApplicable})},{Value:Error({Kind:ErrorKind.NotApplicable})})
+
+>> Concat(Find(["a", "b"], If(1/0<2,"abcdefg")), IfError(Text(Value), $"Error({{Kind:{FirstError.Kind}}})"), ", ")
+"Error({Kind:13}), Error({Kind:13})"
+
+>> Concat(Find(Char(0), ["hello", "great", "world"]), IfError(Text(Value), $"Error({{Kind:{FirstError.Kind}}})"), ", ")
+"Error({Kind:25}), Error({Kind:25}), Error({Kind:25})"
+
+>> Concat(Find(["a", "b", "c"], "The quick brown fox jumped over the lazy dog", [1, 2, 3, 4, 5]), IfError(Text(Value), $"Error({{Kind:{FirstError.Kind}}})"), ", ")
+"38, 11, 8, Error({Kind:27}), Error({Kind:27})"
+
+>> Round(Sqrt(-1), [1, 2, 3])
+Table({Value:Error({Kind:ErrorKind.Numeric})},{Value:Error({Kind:ErrorKind.Numeric})},{Value:Error({Kind:ErrorKind.Numeric})})
+
+>> Concat(Round(Sqrt(-1), [1, 2, 3]), IfError(Text(Value), $"Error({{Kind:{FirstError.Kind}}})"), ", ")
+"Error({Kind:24}), Error({Kind:24}), Error({Kind:24})"
+
+>> Concatenate(["hello", "hi"], If(1<0," world"))
+Table({Value:"hello"},{Value:"hi"})
+
+>> Concatenate(If(1<0,"hi"), ["hello", "great", "world"])
+Table({Value:"hello"},{Value:"great"},{Value:"world"})
+
+>> Find(["a", "b"], If(1<0,"abcdefg"))
+Table({Value:Blank()},{Value:Blank()})
+
+>> Find(If(1<0,"a"), ["hello", "great", "world"])
+Table({Value:1},{Value:1},{Value:1})
+
+>> Round(If(1<0,2), [1, 2, 3])
+Table({Value:0},{Value:0},{Value:0})
+
+>> Concatenate(Filter([1], Value > 10), "test")
+Table()
+
+>> Concatenate(Blank(), Filter([1], Value > 10))
+Blank()
+
+>> Concatenate(Blank(), "test")
+"test"
+
+>> Concatenate(Blank(), ["test"], Filter([1], Value > 10))
+Blank()

@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 using System.Collections.Generic;
+using Microsoft.PowerFx.Core.App.ErrorContainers;
 using Microsoft.PowerFx.Core.Binding;
 using Microsoft.PowerFx.Core.Entities;
 using Microsoft.PowerFx.Core.Errors;
@@ -9,10 +10,9 @@ using Microsoft.PowerFx.Core.Functions;
 using Microsoft.PowerFx.Core.Functions.Delegation;
 using Microsoft.PowerFx.Core.Localization;
 using Microsoft.PowerFx.Core.Logging.Trackers;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
 namespace Microsoft.PowerFx.Core.Texl.Builtins
 {
@@ -20,14 +20,15 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
     // a table as the first argument, and a value function as the second argument.
     internal abstract class StatisticalTableFunction : FunctionWithTableInput
     {
-        public override bool SupportsParamCoercion => true;
-
         public override bool IsSelfContained => true;
 
-        public StatisticalTableFunction(string name, TexlStrings.StringGetter description, FunctionCategories fc)
+        private readonly bool _nativeDecimal = false;
+
+        public StatisticalTableFunction(string name, TexlStrings.StringGetter description, FunctionCategories fc, bool nativeDecimal = false)
             : base(name, description, fc, DType.Number, 0x02, 2, 2, DType.EmptyTable, DType.Number)
         {
             ScopeInfo = new FunctionScopeInfo(this, usesAllFieldsInScope: false, acceptsLiteralPredicates: false);
+            _nativeDecimal = nativeDecimal;
         }
 
         public override bool SupportsPaging(CallNode callNode, TexlBinding binding)
@@ -81,11 +82,11 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
 
                 if (binding.GetType(args[1]) != DType.Number)
                 {
-                    TrackingProvider.Instance.SetDelegationTrackerStatus(DelegationStatus.NotANumberArgType, callNode, binding, this, DelegationTelemetryInfo.CreateEmptyDelegationTelemetryInfo());
+                    TrackingProvider.Instance.SetDelegationTrackerStatus(DelegationStatus.NotANumberArgType, callNode, binding, this, DelegationTelemetryInfo.CreateUnsupportArgTelemetryInfo(binding.GetType(args[1])));
                 }
                 else
                 {
-                    TrackingProvider.Instance.SetDelegationTrackerStatus(DelegationStatus.InvalidArgType, callNode, binding, this, DelegationTelemetryInfo.CreateEmptyDelegationTelemetryInfo());
+                    TrackingProvider.Instance.SetDelegationTrackerStatus(DelegationStatus.InvalidArgType, callNode, binding, this, DelegationTelemetryInfo.CreateUnsupportArgTelemetryInfo(binding.GetType(args[1])));
                 }
 
                 return false;
@@ -109,6 +110,31 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             callNode.Accept(viewFinderVisitor);
 
             return viewFinderVisitor.ContainsView;
+        }
+
+        public override bool CheckTypes(CheckTypesContext context, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
+        {
+            Contracts.AssertValue(args);
+            Contracts.AssertAllValues(args);
+            Contracts.AssertValue(argTypes);
+            Contracts.Assert(args.Length == argTypes.Length);
+            Contracts.AssertValue(errors);
+            Contracts.Assert(MinArity <= args.Length && args.Length <= MaxArity);
+
+            nodeToCoercedTypeMap = new Dictionary<TexlNode, DType>();
+
+            returnType = DetermineNumericFunctionReturnType(_nativeDecimal, context.NumberIsFloat, argTypes[1]);
+
+            if (!CheckType(context, args[1], argTypes[1], returnType, DefaultErrorContainer, ref nodeToCoercedTypeMap))
+            {
+                errors.EnsureError(DocumentErrorSeverity.Severe, args[1], TexlStrings.ErrNumberExpected);
+                nodeToCoercedTypeMap = null;
+                return false;
+            }
+
+            ScopeInfo?.CheckLiteralPredicates(args, errors);
+
+            return true;
         }
     }
 }

@@ -2,9 +2,11 @@
 // Licensed under the MIT license.
 
 using System;
+using System.Text;
 using Microsoft.PowerFx.Core.Types;
+using Microsoft.PowerFx.Core.Utils;
 
-namespace Microsoft.PowerFx.Core.Public.Types
+namespace Microsoft.PowerFx.Types
 {
     public class GuidType : FormulaType
     {
@@ -13,9 +15,19 @@ namespace Microsoft.PowerFx.Core.Public.Types
         {
         }
 
-        public override void Visit(ITypeVistor vistor)
+        public override void Visit(ITypeVisitor vistor)
         {
             vistor.Visit(this);
+        }
+
+        public override string ToString()
+        {
+            return "Guid";
+        }
+
+        internal override void DefaultExpressionValue(StringBuilder sb)
+        {
+            sb.Append($"GUID({CharacterUtils.ToPlainText(System.Guid.Empty.ToString("N"))})");
         }
     }
 }

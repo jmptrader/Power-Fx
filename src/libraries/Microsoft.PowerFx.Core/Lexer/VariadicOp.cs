@@ -1,10 +1,16 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-namespace Microsoft.PowerFx.Core.Lexer
+namespace Microsoft.PowerFx.Syntax
 {
-    internal enum VariadicOp
+    /// <summary>
+    /// Kinds of variadic operators.
+    /// </summary>
+    public enum VariadicOp
     {
+        /// <summary>
+        /// Formula chaining (;).
+        /// </summary>
         Chain,
     }
 }

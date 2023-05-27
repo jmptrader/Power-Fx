@@ -5,22 +5,25 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.PowerFx.Core.Binding;
 using Microsoft.PowerFx.Core.Functions;
-using Microsoft.PowerFx.Core.Lexer;
-using Microsoft.PowerFx.Core.Lexer.Tokens;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
+using Microsoft.PowerFx.Core.Texl.Intellisense;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Types.Enums;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
-namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
+namespace Microsoft.PowerFx.Intellisense.IntellisenseData
 {
     // The IntellisenseData class contains the pre-parsed data for Intellisense to provide suggestions
     internal class IntellisenseData : IIntellisenseData
     {
-        private readonly EnumStore _enumStore;
+        // $$$ This should probably be symbol and not just config. 
+        protected readonly PowerFxConfig _powerFxConfig;
 
-        public IntellisenseData(EnumStore enumStore, IIntellisenseContext context, DType expectedType, TexlBinding binding, TexlFunction curFunc, TexlNode curNode, int argIndex, int argCount, IsValidSuggestion isValidSuggestionFunc, IList<DType> missingTypes, List<CommentToken> comments)
+        internal Features Features => _powerFxConfig.Features;
+
+        private readonly IEnumStore _enumStore;
+
+        public IntellisenseData(PowerFxConfig powerFxConfig, IEnumStore enumStore, IIntellisenseContext context, DType expectedType, TexlBinding binding, TexlFunction curFunc, TexlNode curNode, int argIndex, int argCount, IsValidSuggestion isValidSuggestionFunc, IList<DType> missingTypes, List<CommentToken> comments)
         {
             Contracts.AssertValue(context);
             Contracts.AssertValid(expectedType);
@@ -31,6 +34,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
             Contracts.AssertValueOrNull(missingTypes);
             Contracts.AssertValueOrNull(comments);
 
+            _powerFxConfig = powerFxConfig;
             _enumStore = enumStore;
             ExpectedType = expectedType;
             Suggestions = new IntellisenseSuggestionList();
@@ -96,8 +100,8 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
         internal virtual DType ContextScope => Binding.ContextScope;
 
         /// <summary>
-        /// Returns true if <see cref="suggestion"/> should be added to the suggestion list based on
-        /// <see cref="type"/> and false otherwise.  May be used after suggestions and node type are found.
+        /// Returns true if <paramref name="suggestion"/> should be added to the suggestion list based on
+        /// <paramref name="type"/> and false otherwise.  May be used after suggestions and node type are found.
         /// Note: The default behavior has it so that all candidates are suggestible.  This may not always be
         /// desired.
         /// </summary>
@@ -132,7 +136,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
         /// This method is executed by <see cref="Intellisense"/> when it is run for a formula whose cursor
         /// is positioned to the right of a <see cref="DottedNameNode"/>, but not after the right node of the
         /// <see cref="DottedNameNode"/>.  It is run after all suggestions have been added for
-        /// <see cref="node"/> and may be used to add additional suggestions after the rest.  This method
+        /// <paramref name="node"/> and may be used to add additional suggestions after the rest.  This method
         /// does not alter control flow.
         /// </summary>
         /// <param name="node">
@@ -152,20 +156,20 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
         /// <returns>
         /// True if the provided name collides with an existing name or identifier, false otherwise.
         /// </returns>
-        internal virtual bool DoesNameCollide(string name)
+        internal virtual bool DoesUnqualifiedEnumNameCollide(string name)
         {
-            return (from enumSymbol in _enumStore.EnumSymbols
-                    where (from localizedEnum in enumSymbol.LocalizedEnumValues where localizedEnum == name select localizedEnum).Any()
-                    select enumSymbol).Count() > 1;
+            return _enumStore.EnumSymbols
+                .Where(enumSymbol => enumSymbol.OptionNames.Any(member => member == name))
+                .Any();
         }
 
-        /// <summary>
-        /// Should unqualified enums be suggested.
-        /// </summary>
-        internal virtual bool SuggestUnqualifiedEnums => true;
+        ///// <summary>
+        ///// Should unqualified enums be suggested.
+        ///// </summary>
+        internal bool SuggestUnqualifiedEnums => Binding.NameResolver.SuggestUnqualifiedEnums;
 
         /// <summary>
-        /// Retrieves an <see cref="EnumSymbol"/> from <see cref="binding"/> (if necessary).
+        /// Retrieves an <see cref="EnumSymbol"/> from <paramref name="binding"/> (if necessary).
         /// </summary>
         /// <param name="name">
         /// Name of the enum symbol for which to look.
@@ -174,7 +178,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
         /// Binding in which may be looked for the enum symbol.
         /// </param>
         /// <param name="enumSymbol">
-        /// Should be set to the symbol for <see cref="name"/> if it is found, and left null otherwise.
+        /// Should be set to the symbol for <paramref name="name"/> if it is found, and left null otherwise.
         /// </param>
         /// <returns>
         /// True if the enum symbol was found, false otherwise.
@@ -186,7 +190,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
         {
             Contracts.AssertValue(name);
 
-            symbol = EnumSymbols.Where(symbol => symbol.Name == name).FirstOrDefault();
+            symbol = EnumSymbols.Where(symbol => symbol.EntityName.Value == name).FirstOrDefault();
             return symbol != null;
         }
 
@@ -196,7 +200,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
         internal virtual IEnumerable<EnumSymbol> EnumSymbols => _enumStore.EnumSymbols;
 
         /// <summary>
-        /// Tries to add custom suggestions for a column specified by <see cref="type"/>.
+        /// Tries to add custom suggestions for a column specified by <paramref name="type"/>.
         /// </summary>
         /// <param name="type">
         /// The type of the column for which suggestions may be added.
@@ -241,7 +245,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
         /// This method is called by <see cref="Intellisense"/> to determine whether a candidate suggestion
         /// that represents a function should be suggested.
         /// </summary>
-        /// <param name="suggestion">
+        /// <param name="function">
         /// Candidate suggestion wherein the key represents the suggestion name and the value represents its
         /// type.
         /// </param>
@@ -260,7 +264,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
         /// The type of the scope from where intellisense is run.
         /// </param>
         /// <param name="argumentIndex">
-        /// The index of the current argument of <see cref="function"/>.
+        /// The index of the current argument of <paramref name="function"/>.
         /// </param>
         /// <param name="argsSoFar">
         /// The arguments that are present in the formula at the time of invocation.
@@ -281,7 +285,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
 
         /// <summary>
         /// Should return the kind of suggestion that may be recomended for the
-        /// <see cref="argumentIndex"/> parameter of <see cref="function"/>.
+        /// <paramref name="argumentIndex"/> parameter of <paramref name="function"/>.
         /// </summary>
         /// <param name="function">
         /// Function that the kind of suggestion for which this function determines.
@@ -308,6 +312,16 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
         /// </summary>
         internal virtual void AddCustomSuggestionsForGlobals()
         {
+            foreach (var global in _powerFxConfig.GetSuggestableSymbolName())
+            {
+                DType type = default;
+                if (_powerFxConfig.GetSymbols(global, out var nameInfo))
+                {
+                    type = nameInfo.Type;
+                }
+
+                IntellisenseHelper.AddSuggestion(this, global, SuggestionKind.Global, SuggestionIconKind.Other, type, requiresSuggestionEscaping: true);
+            }
         }
 
         /// <summary>
@@ -334,7 +348,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
         /// <returns>
         /// Sequence of suggestions for first name node context.
         /// </returns>
-        internal virtual IEnumerable<string> SuggestableFirstNames => Enumerable.Empty<string>();
+        internal virtual IEnumerable<string> SuggestableFirstNames => _powerFxConfig.GetSuggestableSymbolName();
 
         /// <summary>
         /// Invokes <see cref="AddSuggestionsForConstantKeywords"/> to supply suggestions for constant
@@ -344,7 +358,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
         public virtual void AddSuggestionsForConstantKeywords() =>
             IntellisenseHelper.AddSuggestionsForMatches(
                 this,
-                TexlLexer.LocalizedInstance.GetConstantKeywords(false),
+                TexlLexer.GetConstantKeywords(false),
                 SuggestionKind.KeyWord,
                 SuggestionIconKind.Other,
                 requiresSuggestionEscaping: false);
@@ -411,7 +425,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
         /// <summary>
         /// This method is called by <see cref="Intellisense.ErrorNodeSuggestionHandlerBase"/> if function was
         /// discovered as a parent node to the current error node.  It may be overridden to add additional
-        /// suggestions pertaining to <see cref="function"/> and <see cref="argIndex"/>.  If it returns true,
+        /// suggestions pertaining to <paramref name="function"/> and <paramref name="argIndex"/>.  If it returns true,
         /// <see cref="Intellisense.ErrorNodeSuggestionHandlerBase"/> will return immediately and no more suggestions
         /// will be added.
         /// </summary>
@@ -447,6 +461,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense.IntellisenseData
         /// </summary>
         internal virtual void AddSuggestionsAfterTopLevelErrorNodeSuggestions()
         {
+            AddCustomSuggestionsForGlobals();
         }
 
         public virtual bool TryAugmentSignature(TexlFunction func, int argIndex, string paramName, int highlightStart, out int newHighlightStart, out int newHighlightEnd, out string newParamName, out string newInvariantParamName) =>

@@ -1,22 +1,76 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.Contracts;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.Serialization;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.PowerFx.Core.IR;
-using Microsoft.PowerFx.Core.Public.Types;
+using Microsoft.PowerFx.Core.Localization;
+using Microsoft.PowerFx.Core.Types;
+using Microsoft.PowerFx.Core.Utils;
 
-namespace Microsoft.PowerFx.Core.Public.Values
+namespace Microsoft.PowerFx.Types
 {
     /// <summary>
     /// Represents a table (both single columna and multi-column). 
     /// </summary>
     public abstract class TableValue : ValidFormulaValue
     {
+        /// <summary>
+        /// Often marshalling an array will create a Single Column Tables with a single "Value" column. 
+        /// </summary>
+        public const string ValueName = "Value";
+
+        /// <summary>
+        /// DName for ValueName.
+        /// </summary>
+        public static readonly DName ValueDName = new DName(ValueName);
+
         public abstract IEnumerable<DValue<RecordValue>> Rows { get; }
 
         public bool IsColumn => IRContext.ResultType._type.IsColumn;
+
+        public new TableType Type => (TableType)base.Type;
+
+        /// <summary>
+        /// Casts <paramref name="record"/> to the table's record type.
+        /// </summary>
+        /// <param name="record"> Record to cast.</param>
+        /// <param name="cancellationToken"></param>
+        public virtual DValue<RecordValue> CastRecord(RecordValue record, CancellationToken cancellationToken)
+        {
+            if (record.Type == Type.ToRecord())
+            {
+                return DValue<RecordValue>.Of(record);
+            }
+
+            var error = new ErrorValue(IRContext, new ExpressionError()
+            {
+                MessageKey = TexlStrings.InvalidCast.Key,
+                Span = IRContext.SourceContext,
+                Kind = ErrorKind.InvalidArgument,
+                MessageArgs = new object[] { record.Type, Type.ToRecord() }
+            });
+
+            return DValue<RecordValue>.Of(error);
+        }
+
+        public TableValue(RecordType recordType)
+            : this(IRContext.NotInSource(recordType.ToTable()))
+        {
+        }
+
+        public TableValue(TableType type)
+            : this(IRContext.NotInSource(type))
+        {
+        }
 
         internal TableValue(IRContext irContext)
             : base(irContext)
@@ -24,15 +78,122 @@ namespace Microsoft.PowerFx.Core.Public.Values
             Contract.Assert(IRContext.ResultType is TableType);
         }
 
+        public virtual int Count()
+        {
+            return Rows.Count();
+        }
+
+        /// <summary>
+        /// Lookup the record at the given 1-based index, or return an error value if out of range.
+        /// </summary>
+        /// <param name="index1">1-based index.</param>
+        /// <returns>The record or an errorValue.</returns>
+        public DValue<RecordValue> Index(int index1)
+        {
+            if (TryGetIndex(index1, out var record))
+            {
+                return record;
+            }
+
+            return DValue<RecordValue>.Of(ArgumentOutOfRange(IRContext));
+        }
+
+        // Index() does standard error messaging and then call TryGetIndex().
+        protected virtual bool TryGetIndex(int index1, out DValue<RecordValue> record)
+        {
+            var index0 = index1 - 1;
+            if (index0 < 0)
+            {
+                record = null;
+                return false;
+            }
+
+            record = Rows.ElementAtOrDefault(index0);
+            return record != null;
+        }
+
+        private static ErrorValue ArgumentOutOfRange(IRContext irContext)
+        {
+            return new ErrorValue(irContext, new ExpressionError()
+            {
+                Message = "Argument out of range",
+                Span = irContext.SourceContext,
+                Kind = ErrorKind.InvalidArgument
+            });
+        }
+
+        private static ErrorValue NotImplemented(IRContext irContext, [CallerMemberName] string methodName = null)
+        {
+            return new ErrorValue(irContext, new ExpressionError()
+            {
+                Message = $"{methodName} is not supported on this table instance.",
+                Span = irContext.SourceContext,
+                Kind = ErrorKind.Internal
+            });
+        }
+
+        // Return appended value 
+        // - Error, 
+        // - with updated values
+        // Async because derived classes may back this with a network call. 
+        public virtual async Task<DValue<RecordValue>> AppendAsync(RecordValue record, CancellationToken cancellationToken)
+        {
+            return DValue<RecordValue>.Of(NotImplemented(IRContext));
+        }
+
+        public virtual async Task<DValue<BooleanValue>> RemoveAsync(IEnumerable<FormulaValue> recordsToRemove, bool all, CancellationToken cancellationToken)
+        {
+            return DValue<BooleanValue>.Of(NotImplemented(IRContext));
+        }
+
+        public virtual async Task<DValue<BooleanValue>> ClearAsync(CancellationToken cancellationToken)
+        {
+            return DValue<BooleanValue>.Of(NotImplemented(IRContext));
+        }
+
+        /// <summary>
+        /// Patch implementation for derived classes.
+        /// </summary>
+        /// <param name="baseRecord">A record to modify.</param>
+        /// <param name="changeRecord">A record that contains properties to modify the base record. All display names are resolved.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns></returns>
+        protected virtual async Task<DValue<RecordValue>> PatchCoreAsync(RecordValue baseRecord, RecordValue changeRecord, CancellationToken cancellationToken)
+        {
+            return DValue<RecordValue>.Of(NotImplemented(IRContext));
+        }
+
+        /// <summary>
+        /// Modifies one record in a data source.
+        /// </summary>
+        /// <param name="baseRecord">A record to modify.</param>
+        /// <param name="changeRecord">A record that contains properties to modify the base record.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <returns>The updated record.</returns>
+        public async Task<DValue<RecordValue>> PatchAsync(RecordValue baseRecord, RecordValue changeRecord, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var recordType = Type.ToRecord();
+
+            // IR has already resolved to logical names because of 
+            // RequiresDataSourceScope, ArgMatchesDatasourceType on function.
+            return await PatchCoreAsync(baseRecord, changeRecord, cancellationToken).ConfigureAwait(false);
+        }
+
         public override object ToObject()
         {
             if (IsColumn)
             {
-                var array = Rows.Select(val =>
+                var array = Rows.Select(async val =>
                 {
                     if (val.IsValue)
                     {
-                        return val.Value.Fields.First().Value.ToObject();
+                        await foreach (var field in val.Value.GetFieldsAsync(CancellationToken.None).ConfigureAwait(false))
+                        {
+                            return field.Value.ToObject();
+                        }
+
+                        return null;
                     }
                     else if (val.IsBlank)
                     {
@@ -43,7 +204,8 @@ namespace Microsoft.PowerFx.Core.Public.Values
                         return val.Error.ToObject();
                     }
                 }).ToArray();
-                return array;
+                Task.WaitAll(array);
+                return array.Select(tsk => tsk.Result).ToArray();
             }
             else
             {
@@ -69,6 +231,44 @@ namespace Microsoft.PowerFx.Core.Public.Values
         public override void Visit(IValueVisitor visitor)
         {
             visitor.Visit(this);
+        }
+
+        public override void ToExpression(StringBuilder sb, FormulaValueSerializerSettings settings)
+        {
+            // Table() is not legal, so we need an alternate expression to capture the table's type.
+            if (!Rows.Any())
+            {
+                if (settings.UseCompactRepresentation)
+                {
+                    sb.Append("Table()");
+
+                    return;
+                }
+
+                sb.Append("FirstN(");
+                Type.DefaultExpressionValue(sb);
+                sb.Append(",0)");
+            }
+            else
+            {
+                var flag = true;
+
+                sb.Append("Table(");
+
+                foreach (var row in Rows)
+                {
+                    if (!flag)
+                    {
+                        sb.Append(",");
+                    }
+
+                    flag = false;
+
+                    row.ToFormulaValue().ToExpression(sb, settings);
+                }
+
+                sb.Append(")");
+            }
         }
     }
 }

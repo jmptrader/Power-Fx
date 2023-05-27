@@ -2,7 +2,6 @@
 // Licensed under the MIT license.
 
 using System.Collections.Generic;
-using Microsoft.PowerFx.Core.Public.Types;
 using Microsoft.PowerFx.Core.Utils;
 
 namespace Microsoft.PowerFx.Core.IR.Nodes
@@ -29,7 +28,7 @@ namespace Microsoft.PowerFx.Core.IR.Nodes
 
         public override string ToString()
         {
-            return $"UnaryOp({Op}, {Child})";
+            return $"{Op}:{IRContext.ResultType._type}({Child})";
         }
     }
 }

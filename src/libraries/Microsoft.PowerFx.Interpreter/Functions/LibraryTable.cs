@@ -4,18 +4,58 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.PowerFx.Core.Entities;
 using Microsoft.PowerFx.Core.IR;
-using Microsoft.PowerFx.Core.Public;
-using Microsoft.PowerFx.Core.Public.Types;
-using Microsoft.PowerFx.Core.Public.Values;
+using Microsoft.PowerFx.Interpreter;
+using Microsoft.PowerFx.Types;
 
 namespace Microsoft.PowerFx.Functions
 {
     internal static partial class Library
     {
+        public static async ValueTask<FormulaValue> LookUp(EvalVisitor runner, EvalVisitorContext context, IRContext irContext, FormulaValue[] args)
+        {
+            // Streaming 
+            var arg0 = (TableValue)args[0];
+            var arg1 = (LambdaFormulaValue)args[1];
+            var arg2 = (LambdaFormulaValue)(args.Length > 2 ? args[2] : null);
+
+            var rows = await LazyFilterAsync(runner, context, arg0.Rows, arg1).ConfigureAwait(false);
+            var row = rows.FirstOrDefault();
+
+            if (row != null)
+            {
+                if (args.Length == 2)
+                {
+                    return row.ToFormulaValue() ?? new BlankValue(irContext);
+                }
+                else
+                {
+                    var childContext = context.SymbolContext.WithScopeValues(row.Value);
+                    return await arg2.EvalInRowScopeAsync(context.NewScope(childContext)).ConfigureAwait(false);
+                }
+            }
+
+            return new BlankValue(irContext);
+        }
+
         public static FormulaValue First(IRContext irContext, TableValue[] args)
         {
-            return args[0].Rows.FirstOrDefault()?.ToFormulaValue() ?? new BlankValue(irContext);
+            var arg0 = args[0];
+
+            if (arg0 is QueryableTableValue tableQueryable)
+            {
+                try
+                {
+                    return tableQueryable.FirstN(1).Rows.FirstOrDefault()?.ToFormulaValue() ?? new BlankValue(irContext);
+                }
+                catch (NotDelegableException)
+                {
+                }
+            }
+
+            return arg0.Rows.FirstOrDefault()?.ToFormulaValue() ?? new BlankValue(irContext);
         }
 
         public static FormulaValue Last(IRContext irContext, TableValue[] args)
@@ -25,8 +65,29 @@ namespace Microsoft.PowerFx.Functions
 
         public static FormulaValue FirstN(IRContext irContext, FormulaValue[] args)
         {
+            if (args[0] is BlankValue)
+            {
+                return new BlankValue(irContext);
+            }
+
+            if (args[0] is not TableValue)
+            {
+                return CommonErrors.RuntimeTypeMismatch(irContext);
+            }
+
             var arg0 = (TableValue)args[0];
             var arg1 = (NumberValue)args[1];
+
+            if (arg0 is QueryableTableValue queryableTable)
+            {
+                try
+                {
+                    return queryableTable.FirstN((int)arg1.Value);
+                }
+                catch (NotDelegableException)
+                {
+                }
+            }
 
             var rows = arg0.Rows.Take((int)arg1.Value);
             return new InMemoryTableValue(irContext, rows);
@@ -34,6 +95,16 @@ namespace Microsoft.PowerFx.Functions
 
         public static FormulaValue LastN(IRContext irContext, FormulaValue[] args)
         {
+            if (args[0] is BlankValue)
+            {
+                return new BlankValue(irContext);
+            }
+
+            if (args[0] is not TableValue)
+            {
+                return CommonErrors.RuntimeTypeMismatch(irContext);
+            }
+
             var arg0 = (TableValue)args[0];
             var arg1 = (NumberValue)args[1];
 
@@ -48,7 +119,7 @@ namespace Microsoft.PowerFx.Functions
         }
 
         // Create new table
-        public static FormulaValue AddColumns(EvalVisitor runner, SymbolContext symbolContext, IRContext irContext, FormulaValue[] args)
+        public static async ValueTask<FormulaValue> AddColumns(EvalVisitor runner, EvalVisitorContext context, IRContext irContext, FormulaValue[] args)
         {
             var sourceArg = (TableValue)args[0];
 
@@ -56,94 +127,244 @@ namespace Microsoft.PowerFx.Functions
 
             var tableType = (TableType)irContext.ResultType;
             var recordIRContext = new IRContext(irContext.SourceContext, tableType.ToRecord());
-            var rows = LazyAddColumns(runner, symbolContext, sourceArg.Rows, recordIRContext, newColumns);
+            var rows = await LazyAddColumnsAsync(runner, context, sourceArg.Rows, recordIRContext, newColumns).ConfigureAwait(false);
 
             return new InMemoryTableValue(irContext, rows);
         }
 
-        private static IEnumerable<DValue<RecordValue>> LazyAddColumns(EvalVisitor runner, SymbolContext context, IEnumerable<DValue<RecordValue>> sources, IRContext recordIRContext, NamedLambda[] newColumns)
+        public static async ValueTask<FormulaValue> DropColumns(EvalVisitor runner, EvalVisitorContext context, IRContext irContext, FormulaValue[] args)
         {
+            var sourceArg = (TableValue)args[0];
+
+            var tableType = (TableType)irContext.ResultType;
+            var recordIRContext = new IRContext(irContext.SourceContext, tableType.ToRecord());
+            var rows = await LazyDropColumnsAsync(runner, context, sourceArg.Rows, recordIRContext, args.Skip(1).ToArray()).ConfigureAwait(false);
+
+            return new InMemoryTableValue(irContext, rows);
+        }
+
+        private static async Task<IEnumerable<DValue<RecordValue>>> LazyAddColumnsAsync(EvalVisitor runner, EvalVisitorContext context, IEnumerable<DValue<RecordValue>> sources, IRContext recordIRContext, NamedLambda[] newColumns)
+        {
+            var list = new List<DValue<RecordValue>>();
+
             foreach (var row in sources)
             {
+                runner.CheckCancel();
+
                 if (row.IsValue)
                 {
                     // $$$ this is super inefficient... maybe a custom derived RecordValue? 
                     var fields = new List<NamedValue>(row.Value.Fields);
 
-                    var childContext = context.WithScopeValues(row.Value);
+                    var childContext = context.SymbolContext.WithScopeValues(row.Value);
 
                     foreach (var column in newColumns)
                     {
-                        var value = column.Lambda.Eval(runner, childContext);
+                        runner.CheckCancel();
+
+                        var value = await column.Lambda.EvalInRowScopeAsync(context.NewScope(childContext)).ConfigureAwait(false);
                         fields.Add(new NamedValue(column.Name, value));
                     }
 
-                    yield return DValue<RecordValue>.Of(new InMemoryRecordValue(recordIRContext, fields.ToArray()));
+                    list.Add(DValue<RecordValue>.Of(new InMemoryRecordValue(recordIRContext, fields.ToArray())));
                 }
                 else
                 {
-                    yield return row;
+                    list.Add(row);
                 }
             }
+
+            return list;
+        }
+
+        private static async Task<IEnumerable<DValue<RecordValue>>> LazyDropColumnsAsync(EvalVisitor runner, EvalVisitorContext context, IEnumerable<DValue<RecordValue>> sources, IRContext recordIRContext, FormulaValue[] columnsToRemove)
+        {
+            var list = new List<DValue<RecordValue>>();
+            var columnNames = new HashSet<string>(columnsToRemove.OfType<StringValue>().Select(sv => sv.Value));
+
+            foreach (var row in sources)
+            {
+                runner.CheckCancel();
+
+                if (row.IsValue)
+                {
+                    list.Add(DValue<RecordValue>.Of(new InMemoryRecordValue(recordIRContext, row.Value.Fields.Where(f => !columnNames.Contains(f.Name)).ToArray())));
+                }
+                else
+                {
+                    list.Add(row);
+                }
+            }
+
+            return list;
         }
 
         // CountRows
-        public static FormulaValue CountRows(IRContext irContext, TableValue[] args)
+        public static FormulaValue CountRows(IRContext irContext, FormulaValue[] args)
         {
             var arg0 = args[0];
 
-            // Streaming 
-            var count = arg0.Rows.Count();
-            return new NumberValue(irContext, count);
+            if (arg0 is BlankValue)
+            {
+                return NumberOrDecimalValue(irContext, 0);
+            }
+
+            if (arg0 is TableValue table)
+            {
+                var error = table.Rows.Where(r => r.IsError).Select(r => r.Error).FirstOrDefault();
+                if (error != null)
+                {
+                    return error;
+                }
+
+                var count = table.Count();
+                return NumberOrDecimalValue(irContext, count);
+            }
+
+            return CommonErrors.RuntimeTypeMismatch(irContext);
         }
 
-        public static FormulaValue CountIf(EvalVisitor runner, SymbolContext symbolContext, IRContext irContext, FormulaValue[] args)
+        // Count
+        public static FormulaValue Count(IRContext irContext, FormulaValue[] args)
         {
-            // Streaming 
-            var sources = (TableValue)args[0];
-            var filter = (LambdaFormulaValue)args[1];
-
+            var arg0 = args[0];
             var count = 0;
 
-            var errors = new List<ErrorValue>();
-
-            foreach (var row in sources.Rows)
+            if (arg0 is BlankValue)
             {
-                if (row.IsValue)
-                {
-                    var childContext = symbolContext.WithScopeValues(row.Value);
-                    var result = filter.Eval(runner, childContext);
+                return NumberOrDecimalValue(irContext, 0);
+            }
 
-                    if (result is ErrorValue error)
+            if (arg0 is TableValue table)
+            {
+                foreach (var row in table.Rows)
+                {
+                    if (row.IsBlank)
                     {
-                        errors.Add(error);
                         continue;
                     }
+                    else if (row.IsError)
+                    {
+                        return row.Error;
+                    }
 
-                    var include = ((BooleanValue)result).Value;
+                    var field = row.Value.Fields.First().Value;
 
-                    if (include)
+                    if (field is ErrorValue error)
+                    {
+                        return error;
+                    }
+
+                    if (field is NumberValue || field is DecimalValue)
                     {
                         count++;
                     }
                 }
 
-                if (row.IsError)
+                return NumberOrDecimalValue(irContext, count);
+            }
+
+            return CommonErrors.RuntimeTypeMismatch(irContext);
+        }
+
+        // CountA
+        public static FormulaValue CountA(IRContext irContext, FormulaValue[] args)
+        {
+            var arg0 = args[0];
+            if (arg0 is BlankValue)
+            {
+                return NumberOrDecimalValue(irContext, 0);
+            }
+
+            if (arg0 is TableValue table)
+            {
+                var count = 0;
+
+                foreach (var row in table.Rows)
                 {
-                    errors.Add(row.Error);
+                    if (row.IsBlank)
+                    {
+                        continue;
+                    }
+                    else if (row.IsError)
+                    {
+                        return row.Error;
+                    }
+
+                    var field = row.Value.Fields.First().Value;
+
+                    if (field is ErrorValue error)
+                    {
+                        return error;
+                    }
+
+                    if (field is not BlankValue)
+                    {
+                        count++;
+                    }
+                }
+
+                return NumberOrDecimalValue(irContext, count);
+            }
+
+            return CommonErrors.RuntimeTypeMismatch(irContext);
+        }
+
+        public static async ValueTask<FormulaValue> CountIf(EvalVisitor runner, EvalVisitorContext context, IRContext irContext, FormulaValue[] args)
+        {
+            if (args[0] is BlankValue)
+            {
+                return NumberOrDecimalValue(irContext, 0);
+            }
+
+            // Streaming 
+            var sources = (TableValue)args[0];
+            var filters = args.Skip(1).Cast<LambdaFormulaValue>().ToArray();
+
+            var count = 0;
+
+            foreach (var row in sources.Rows)
+            {
+                runner.CheckCancel();
+
+                SymbolContext childContext = context.SymbolContext.WithScopeValues(row.ToFormulaValue());
+
+                var include = true;
+                for (var i = 0; i < filters.Length; i++)
+                {
+                    runner.CheckCancel();
+
+                    var result = await filters[i].EvalInRowScopeAsync(context.NewScope(childContext)).ConfigureAwait(false);
+
+                    if (result is ErrorValue error)
+                    {
+                        return error;
+                    }
+                    else if (result is BlankValue)
+                    {
+                        include = false;
+                        break;
+                    }
+
+                    include = ((BooleanValue)result).Value;
+
+                    if (!include)
+                    {
+                        break;
+                    }
+                }
+
+                if (include)
+                {
+                    count++;
                 }
             }
 
-            if (errors.Count != 0)
-            {
-                return ErrorValue.Combine(irContext, errors);
-            }
-
-            return new NumberValue(irContext, count);
+            return NumberOrDecimalValue(irContext, count);
         }
 
         // Filter ([1,2,3,4,5], Value > 5)
-        public static FormulaValue FilterTable(EvalVisitor runner, SymbolContext symbolContext, IRContext irContext, FormulaValue[] args)
+        public static async ValueTask<FormulaValue> FilterTable(EvalVisitor runner, EvalVisitorContext context, IRContext irContext, FormulaValue[] args)
         {
             // Streaming 
             var arg0 = (TableValue)args[0];
@@ -159,47 +380,128 @@ namespace Microsoft.PowerFx.Functions
                 });
             }
 
-            var rows = LazyFilter(runner, symbolContext, arg0.Rows, arg1);
+            if (arg0 is QueryableTableValue tableQueryable)
+            {
+                try
+                {
+                    return tableQueryable.Filter(arg1, runner, context);
+                }
+                catch (NotDelegableException)
+                {
+                }
+            }
+
+            var rows = await LazyFilterAsync(runner, context, arg0.Rows, arg1).ConfigureAwait(false);
 
             return new InMemoryTableValue(irContext, rows);
         }
 
-        public static FormulaValue SortTable(EvalVisitor runner, SymbolContext symbolContext, IRContext irContext, FormulaValue[] args)
+        public static FormulaValue IndexTable(IRContext irContext, FormulaValue[] args)
+        {
+            var arg0 = (TableValue)args[0];
+            var arg1 = (NumberValue)args[1];
+            var rowIndex = (int)arg1.Value;
+
+            return arg0.Index(rowIndex).ToFormulaValue();
+        }
+
+        public static FormulaValue Shuffle(IServiceProvider services, IRContext irContext, FormulaValue[] args)
+        {
+            var table = (TableValue)args[0];
+            var records = table.Rows;
+
+            var random = services.GetService<IRandomService>(_defaultRandService);
+
+            var shuffledRecords = records.OrderBy(a => random.SafeNextDouble()).ToList();
+            return new InMemoryTableValue(irContext, shuffledRecords);
+        }
+
+        private static async Task<(DValue<RecordValue> row, FormulaValue lambdaValue)> ApplyLambda(EvalVisitor runner, EvalVisitorContext context, DValue<RecordValue> row, LambdaFormulaValue lambda)
+        {
+            if (!row.IsValue)
+            {
+                return (row, row.ToFormulaValue());
+            }
+
+            var childContext = context.SymbolContext.WithScopeValues(row.Value);
+            var lambdaValue = await lambda.EvalInRowScopeAsync(context.NewScope(childContext)).ConfigureAwait(false);
+
+            return (row, lambdaValue);
+        }
+
+        public static async ValueTask<FormulaValue> DistinctTable(EvalVisitor runner, EvalVisitorContext context, IRContext irContext, FormulaValue[] args)
+        {
+            var arg0 = (TableValue)args[0];
+            var arg1 = (LambdaFormulaValue)args[1];
+
+            var values = arg0.Rows.Select(row => ApplyLambda(runner, context, row, arg1));
+            
+            var pairs = new List<(DValue<RecordValue> row, FormulaValue distinctValue)>();
+
+            foreach (var pair in values)
+            {
+                runner.CheckCancel();
+                pairs.Add(await pair.ConfigureAwait(false));
+            }
+
+            return DistinctValueType(pairs, irContext);
+        }
+
+        public static async ValueTask<FormulaValue> SortTable(EvalVisitor runner, EvalVisitorContext context, IRContext irContext, FormulaValue[] args)
         {
             var arg0 = (TableValue)args[0];
             var arg1 = (LambdaFormulaValue)args[1];
             var arg2 = (StringValue)args[2];
 
-            var pairs = arg0.Rows.Select(row =>
+            var isDescending = arg2.Value.Equals("descending", StringComparison.OrdinalIgnoreCase);
+
+            if (arg0 is QueryableTableValue queryableTable)
             {
-                if (row.IsValue)
+                try
                 {
-                    var childContext = symbolContext.WithScopeValues(row.Value);
-                    return new KeyValuePair<DValue<RecordValue>, FormulaValue>(row, arg1.Eval(runner, childContext));
+                    return queryableTable.Sort(arg1, isDescending, runner, context);
                 }
-
-                return new KeyValuePair<DValue<RecordValue>, FormulaValue>(row, row.ToFormulaValue());
-            }).ToList();
-
-            var errors = new List<ErrorValue>(pairs.Select(pair => pair.Value).OfType<ErrorValue>());
-
-            var allNumbers = pairs.All(pair => IsValueTypeErrorOrBlank<NumberValue>(pair.Value));
-            var allStrings = pairs.All(pair => IsValueTypeErrorOrBlank<StringValue>(pair.Value));
-            var allBooleans = pairs.All(pair => IsValueTypeErrorOrBlank<BooleanValue>(pair.Value));
-
-            if (!(allNumbers || allStrings || allBooleans))
-            {
-                errors.Add(CommonErrors.RuntimeTypeMismatch(irContext));
-                return ErrorValue.Combine(irContext, errors);
+                catch (NotDelegableException)
+                {
+                }
             }
 
-            if (errors.Count != 0)
+            var pairs = new List<(DValue<RecordValue> row, FormulaValue distinctValue)>();
+
+            foreach (var pair in arg0.Rows.Select(row => ApplyLambda(runner, context, row, arg1)))
             {
-                return ErrorValue.Combine(irContext, errors);
+                runner.CheckCancel();
+
+                pairs.Add(await pair.ConfigureAwait(false));
+            }
+
+            bool allNumbers = true, allDecimals = true, allStrings = true, allBooleans = true, allDatetimes = true, allDates = true, allOptionSets = true;
+
+            foreach (var (row, sortValue) in pairs)
+            {
+                runner.CheckCancel();
+
+                allNumbers &= IsValueTypeErrorOrBlank<NumberValue>(sortValue);
+                allDecimals &= IsValueTypeErrorOrBlank<DecimalValue>(sortValue);
+                allStrings &= IsValueTypeErrorOrBlank<StringValue>(sortValue);
+                allBooleans &= IsValueTypeErrorOrBlank<BooleanValue>(sortValue);
+                allDatetimes &= IsValueTypeErrorOrBlank<DateTimeValue>(sortValue);
+                allDates &= IsValueTypeErrorOrBlank<DateValue>(sortValue);
+                allOptionSets &= IsValueTypeErrorOrBlank<OptionSetValue>(sortValue);
+
+                if (sortValue is ErrorValue errorValue)
+                {
+                    return errorValue;
+                }
+            }
+
+            if (!(allNumbers || allDecimals || allStrings || allBooleans || allDatetimes || allDates || allOptionSets))
+            {
+                return CommonErrors.RuntimeTypeMismatch(irContext);
             }
 
             var compareToResultModifier = 1;
-            if (arg2.Value.ToLower() == "descending")
+            if (isDescending)
             {
                 compareToResultModifier = -1;
             }
@@ -208,13 +510,49 @@ namespace Microsoft.PowerFx.Functions
             {
                 return SortValueType<NumberValue, double>(pairs, irContext, compareToResultModifier);
             }
+            else if (allDecimals)
+            {
+                return SortValueType<DecimalValue, decimal>(pairs, irContext, compareToResultModifier);
+            }
             else if (allStrings)
             {
                 return SortValueType<StringValue, string>(pairs, irContext, compareToResultModifier);
             }
-            else
+            else if (allBooleans)
             {
                 return SortValueType<BooleanValue, bool>(pairs, irContext, compareToResultModifier);
+            }
+            else if (allDatetimes)
+            {
+                return SortValueType<DateTimeValue, DateTime>(pairs, irContext, compareToResultModifier);
+            }
+            else if (allDates)
+            {
+                return SortValueType<DateValue, DateTime>(pairs, irContext, compareToResultModifier);
+            }
+            else if (allOptionSets)
+            {
+                return SortOptionSet(pairs, irContext, compareToResultModifier);
+            }
+            else
+            {
+                return CommonErrors.RuntimeTypeMismatch(irContext);
+            }
+        }
+
+        public static async ValueTask<FormulaValue> AsType(EvalVisitor runner, EvalVisitorContext context, IRContext irContext, FormulaValue[] args)
+        {
+            var arg0 = (RecordValue)args[0];
+            var arg1 = (TableValue)args[1];
+
+            try
+            {
+                var result = arg1.CastRecord(arg0, runner.CancellationToken);
+                return result.ToFormulaValue();
+            }
+            catch (CustomFunctionErrorException e)
+            {
+                return new ErrorValue(irContext, e.ExpressionError);
             }
         }
 
@@ -224,59 +562,144 @@ namespace Microsoft.PowerFx.Functions
             return val is T || val is BlankValue || val is ErrorValue;
         }
 
-        private static FormulaValue SortValueType<TPFxPrimitive, TDotNetPrimitive>(List<KeyValuePair<DValue<RecordValue>, FormulaValue>> pairs, IRContext irContext, int compareToResultModifier)
+        private static FormulaValue DistinctValueType(List<(DValue<RecordValue> row, FormulaValue distinctValue)> pairs, IRContext irContext)
+        {
+            var lookup = new HashSet<object>();
+            var result = new List<DValue<RecordValue>>();
+            var name = ((TableType)irContext.ResultType).SingleColumnFieldName;
+
+            foreach (var (row, distinctValue) in pairs)
+            {
+                if (distinctValue is ErrorValue errorValue)
+                {
+                    return errorValue;
+                }
+
+                if (!distinctValue.Type._type.IsPrimitive)
+                {
+                    return CommonErrors.OnlyPrimitiveValuesAllowed(irContext);
+                }
+
+                var key = distinctValue.ToObject();
+
+                if (!lookup.Contains(key))
+                {
+                    var insert = FormulaValue.NewRecordFromFields(new NamedValue(name, distinctValue));
+                    lookup.Add(key);
+                    result.Add(DValue<RecordValue>.Of(insert));
+                }
+            }
+
+            return new InMemoryTableValue(irContext, result);
+        }
+
+        private static FormulaValue SortValueType<TPFxPrimitive, TDotNetPrimitive>(List<(DValue<RecordValue> row, FormulaValue sortValue)> pairs, IRContext irContext, int compareToResultModifier)
             where TPFxPrimitive : PrimitiveValue<TDotNetPrimitive>
             where TDotNetPrimitive : IComparable<TDotNetPrimitive>
         {
             pairs.Sort((a, b) =>
             {
-                if (a.Value is BlankValue)
+                if (a.sortValue is BlankValue)
                 {
-                    return b.Value is BlankValue ? 0 : 1;
+                    return b.sortValue is BlankValue ? 0 : 1;
                 }
-                else if (b.Value is BlankValue)
+                else if (b.sortValue is BlankValue)
                 {
                     return -1;
                 }
 
-                var n1 = a.Value as TPFxPrimitive;
-                var n2 = b.Value as TPFxPrimitive;
+                var n1 = a.sortValue as TPFxPrimitive;
+                var n2 = b.sortValue as TPFxPrimitive;
                 return n1.Value.CompareTo(n2.Value) * compareToResultModifier;
             });
 
-            return new InMemoryTableValue(irContext, pairs.Select(pair => pair.Key));
+            return new InMemoryTableValue(irContext, pairs.Select(pair => pair.row));
         }
 
-        private static IEnumerable<DValue<RecordValue>> LazyFilter(
-            EvalVisitor runner,
-            SymbolContext context,
-            IEnumerable<DValue<RecordValue>> sources,
-            LambdaFormulaValue filter)
+        private static FormulaValue SortOptionSet(List<(DValue<RecordValue> row, FormulaValue sortValue)> pairs, IRContext irContext, int compareToResultModifier)
         {
+            pairs.Sort((a, b) =>
+            {
+                if (a.sortValue is BlankValue)
+                {
+                    return b.sortValue is BlankValue ? 0 : 1;
+                }
+                else if (b.sortValue is BlankValue)
+                {
+                    return -1;
+                }
+
+                var n1 = a.sortValue as OptionSetValue;
+                var n2 = b.sortValue as OptionSetValue;
+
+                return string.Compare(n1.Option, n2.Option, StringComparison.Ordinal) * compareToResultModifier;
+            });
+
+            return new InMemoryTableValue(irContext, pairs.Select(pair => pair.row));
+        }        
+
+        private static FormulaValue Refresh(EvalVisitor runner, EvalVisitorContext context, IRContext irContext, FormulaValue[] args)
+        {
+            if (args[0] is IRefreshable r)
+            {
+                r.Refresh();
+                return FormulaValue.New(true);
+            }
+
+            return CommonErrors.CustomError(irContext, "Only managed connections can be refreshed.");
+        }
+
+        private static async Task<DValue<RecordValue>> LazyFilterRowAsync(
+           EvalVisitor runner,
+           EvalVisitorContext context,
+           DValue<RecordValue> row,
+           LambdaFormulaValue filter)
+        {
+            SymbolContext childContext = context.SymbolContext.WithScopeValues(row.ToFormulaValue());
+
+            // Filter evals to a boolean 
+            var result = await filter.EvalInRowScopeAsync(context.NewScope(childContext)).ConfigureAwait(false);
+            var include = false;
+            if (result is BooleanValue booleanValue)
+            {
+                include = booleanValue.Value;
+            }
+            else if (result is ErrorValue errorValue)
+            {
+                return DValue<RecordValue>.Of(errorValue);
+            }
+
+            if (include)
+            {
+                return row;
+            }
+
+            return null;
+        }
+
+        private static async Task<DValue<RecordValue>[]> LazyFilterAsync(
+            EvalVisitor runner,
+            EvalVisitorContext context,
+            IEnumerable<DValue<RecordValue>> sources,
+            LambdaFormulaValue filter,
+            int topN = int.MaxValue)
+        {
+            var results = new List<DValue<RecordValue>>();
+
+            // Filter needs to allow running in parallel. 
             foreach (var row in sources)
             {
-                if (row.IsValue)
-                {
-                    var childContext = context.WithScopeValues(row.Value);
+                runner.CheckCancel();
 
-                    // Filter evals to a boolean 
-                    var result = filter.Eval(runner, childContext);
-                    var include = false;
-                    if (result is BooleanValue booleanValue)
-                    {
-                        include = booleanValue.Value;
-                    }
-                    else if (result is ErrorValue errorValue)
-                    {
-                        yield return DValue<RecordValue>.Of(errorValue);
-                    }
-
-                    if (include)
-                    {
-                        yield return row;
-                    }
-                }
+                var task = LazyFilterRowAsync(runner, context, row, filter);
+                
+                results.Add(await task.ConfigureAwait(false));
             }
+                        
+            // Remove all nulls. 
+            var final = results.Where(x => x != null);
+
+            return final.ToArray();
         }
 
         // AddColumns accepts pairs of args. 
@@ -292,8 +715,8 @@ namespace Microsoft.PowerFx.Functions
 
                 for (var i = 1; i < args.Length; i += 2)
                 {
-                    var columnName = ((StringValue)args[1]).Value;
-                    var arg1 = (LambdaFormulaValue)args[2];
+                    var columnName = ((StringValue)args[i]).Value;
+                    var arg1 = (LambdaFormulaValue)args[i + 1];
                     l.Add(new NamedLambda
                     {
                         Name = columnName,

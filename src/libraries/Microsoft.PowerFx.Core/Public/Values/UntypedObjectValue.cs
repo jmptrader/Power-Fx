@@ -6,11 +6,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Contracts;
 using System.Text;
-using System.Text.Json;
 using Microsoft.PowerFx.Core.IR;
-using Microsoft.PowerFx.Core.Public.Types;
 
-namespace Microsoft.PowerFx.Core.Public.Values
+namespace Microsoft.PowerFx.Types
 {
     /// <summary>
     /// The backing implementation for UntypedObjectValue, for example Json, Xml,
@@ -36,7 +34,16 @@ namespace Microsoft.PowerFx.Core.Public.Values
 
         double GetDouble();
 
+        decimal GetDecimal();
+
         bool GetBoolean();
+
+        // For providers that do not imply a type for numbers (JSON), GetUntypedNumber is used to access the raw
+        // underlying string representation, likely from the source representation (again in the case of JSON).
+        // It is validated to be in a culture invariant standard format number, possibly with dot decimal separator and "E" exponent.
+        // This method need not be implemetned if ExteranlType.UntypedNumber is not used.
+        // GetDouble and GetDecimal can be called on an ExternalType.UntypedNumber.
+        string GetUntypedNumber();
     }
 
     [DebuggerDisplay("UntypedObjectValue({Impl})")]
@@ -59,6 +66,12 @@ namespace Microsoft.PowerFx.Core.Public.Values
         public override void Visit(IValueVisitor visitor)
         {
             visitor.Visit(this);
+        }
+
+        public override void ToExpression(StringBuilder sb, FormulaValueSerializerSettings settings)
+        {
+            // Not supported for the time being.
+            throw new NotImplementedException("UntypedObjectValue cannot be serialized.");
         }
     }
 }

@@ -1,20 +1,41 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-using Microsoft.PowerFx.Core.Lexer.Tokens;
 using Microsoft.PowerFx.Core.Localization;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
-namespace Microsoft.PowerFx.Core.Syntax
+namespace Microsoft.PowerFx.Syntax
 {
-    internal sealed class Identifier
+    /// <summary>
+    /// The identifier during parsing.
+    /// </summary>
+    [ThreadSafeImmutable]
+    public sealed class Identifier
     {
-        public readonly Token AtToken; // The "@" token, if any. May be null.
-        public readonly IdentToken Token;
-        public readonly DName Name;
-        public readonly DPath Namespace;
+        internal readonly Token AtToken; // The "@" token, if any. May be null.
+        internal readonly IdentToken Token;
 
-        public Identifier(DPath theNamespace, Token atToken, IdentToken tok)
+        public Span Span => HasAtToken ? 
+            new Span(AtToken.Span.Min, Token.Span.Lim) : 
+            Token.Span;
+
+        /// <summary>
+        /// The simple name of the identifier.
+        /// </summary>
+        public DName Name { get; }
+
+        /// <summary>
+        /// The namespace of the identifier.
+        /// </summary>
+        public DPath Namespace { get; }
+
+        /// <summary>
+        /// Whether this identifier has <c>@</c> token, used to distinguish <c>X</c> from <c>[@X]</c>.
+        /// </summary>
+        public bool HasAtToken => AtToken != null;
+
+        internal Identifier(DPath theNamespace, Token atToken, IdentToken tok)
         {
             Contracts.Assert(theNamespace.IsValid);
             Contracts.AssertValueOrNull(atToken);
@@ -27,7 +48,7 @@ namespace Microsoft.PowerFx.Core.Syntax
             Name = tok.Name;
         }
 
-        public Identifier Clone(Span ts)
+        internal Identifier Clone(Span ts)
         {
             return new Identifier(
                 Namespace,
@@ -35,12 +56,12 @@ namespace Microsoft.PowerFx.Core.Syntax
                 Token.Clone(ts).As<IdentToken>());
         }
 
-        public Identifier(IdentToken token)
+        internal Identifier(IdentToken token)
             : this(DPath.Root, null, token)
         {
         }
 
-        public Identifier(Token atToken, IdentToken token)
+        internal Identifier(Token atToken, IdentToken token)
             : this(DPath.Root, atToken, token)
         {
         }

@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Web;
 using Microsoft.PowerFx.Core;
@@ -10,7 +11,9 @@ using Microsoft.PowerFx.Core.Errors;
 using Microsoft.PowerFx.Core.Public;
 using Microsoft.PowerFx.Core.Texl.Intellisense;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Intellisense;
 using Microsoft.PowerFx.LanguageServerProtocol.Protocol;
+using Microsoft.PowerFx.Syntax;
 
 namespace Microsoft.PowerFx.LanguageServerProtocol
 {
@@ -41,6 +44,14 @@ namespace Microsoft.PowerFx.LanguageServerProtocol
         {
             PropertyNameCaseInsensitive = true
         };
+
+        public delegate void OnLogUnhandledExceptionHandler(Exception e);
+
+        /// <summary>
+        /// Callback for host to get notified of unhandled exceptions that are happening asynchronously.
+        /// This should be used for logging purposes. 
+        /// </summary>
+        public event OnLogUnhandledExceptionHandler LogUnhandledExceptionHandler;
 
         public LanguageServer(SendToClient sendToClient, IPowerFxScopeFactory scopeFactory)
         {
@@ -103,6 +114,15 @@ namespace Microsoft.PowerFx.LanguageServerProtocol
                         case TextDocumentNames.CodeAction:
                             HandleCodeActionRequest(id, paramsJson);
                             break;
+                        case CustomProtocolNames.CommandExecuted:
+                            HandleCommandExecutedRequest(id, paramsJson);
+                            break;
+                        case TextDocumentNames.FullDocumentSemanticTokens:
+                            HandleFullDocumentSemanticTokens(id, paramsJson);
+                            break;
+                        case TextDocumentNames.RangeDocumentSemanticTokens:
+                            HandleRangeDocumentSemanticTokens(id, paramsJson);
+                            break;
                         default:
                             _sendToClient(JsonRpcHelper.CreateErrorResult(id, JsonRpcHelper.ErrorCode.MethodNotFound));
                             break;
@@ -111,8 +131,56 @@ namespace Microsoft.PowerFx.LanguageServerProtocol
             }
             catch (Exception ex)
             {
-                _sendToClient(JsonRpcHelper.CreateErrorResult(id, ex.Message));
+                LogUnhandledExceptionHandler?.Invoke(ex);
+
+                _sendToClient(JsonRpcHelper.CreateErrorResult(id, JsonRpcHelper.ErrorCode.InternalError, ex.Message));
                 return;
+            }
+        }
+
+        private void HandleCommandExecutedRequest(string id, string paramsJson)
+        {
+            if (id == null)
+            {
+                _sendToClient(JsonRpcHelper.CreateErrorResult(id, JsonRpcHelper.ErrorCode.InvalidRequest));
+                return;
+            }
+
+            Contracts.AssertValue(id);
+            Contracts.AssertValue(paramsJson);
+
+            if (!TryParseParams(paramsJson, out CommandExecutedParams commandExecutedParams))
+            {
+                _sendToClient(JsonRpcHelper.CreateErrorResult(id, JsonRpcHelper.ErrorCode.ParseError));
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(commandExecutedParams.Argument))
+            {
+                _sendToClient(JsonRpcHelper.CreateErrorResult(id, JsonRpcHelper.ErrorCode.PropertyValueRequired, $"{nameof(CommandExecutedParams.Argument)} is null or empty."));
+                return;
+            }
+
+            switch (commandExecutedParams.Command)
+            {
+                case CommandName.CodeActionApplied:
+                    var codeActionResult = JsonRpcHelper.Deserialize<CodeAction>(commandExecutedParams.Argument);
+                    if (codeActionResult.ActionResultContext == null)
+                    {
+                        _sendToClient(JsonRpcHelper.CreateErrorResult(id, JsonRpcHelper.ErrorCode.PropertyValueRequired, $"{nameof(CodeAction.ActionResultContext)} is null or empty."));
+                        return;
+                    }
+
+                    var scope = _scopeFactory.GetOrCreateInstance(commandExecutedParams.TextDocument.Uri);
+                    if (scope is EditorContextScope scopeQuickFix)
+                    {
+                        scopeQuickFix.OnCommandExecuted(codeActionResult);
+                    }
+
+                    break;
+                default:
+                    _sendToClient(JsonRpcHelper.CreateErrorResult(id, JsonRpcHelper.ErrorCode.InvalidRequest, $"{commandExecutedParams.Command} is not supported."));
+                    break;
             }
         }
 
@@ -132,7 +200,7 @@ namespace Microsoft.PowerFx.LanguageServerProtocol
             var expression = didOpenParams.TextDocument.Text;
             var result = scope.Check(expression);
 
-            PublishDiagnosticsNotification(documentUri, expression, result.Errors);
+            PublishDiagnosticsNotification(documentUri, expression, result.Errors.ToArray());
 
             PublishTokens(documentUri, result);
 
@@ -163,7 +231,7 @@ namespace Microsoft.PowerFx.LanguageServerProtocol
             var expression = didChangeParams.ContentChanges[0].Text;
             var result = scope.Check(expression);
 
-            PublishDiagnosticsNotification(documentUri, expression, result.Errors);
+            PublishDiagnosticsNotification(documentUri, expression, result.Errors.ToArray());
 
             PublishTokens(documentUri, result);
 
@@ -276,10 +344,7 @@ namespace Microsoft.PowerFx.LanguageServerProtocol
             var scope = _scopeFactory.GetOrCreateInstance(documentUri);
 
             var expression = initialFixupParams.TextDocument.Text;
-            if (scope is IPowerFxScopeDisplayName scopeDisplayName)
-            {
-                expression = scopeDisplayName.TranslateToDisplayName(expression);
-            }
+            expression = scope.ConvertToDisplay(expression);
 
             _sendToClient(JsonRpcHelper.CreateSuccessResult(id, new TextDocumentItem()
             {
@@ -321,13 +386,11 @@ namespace Microsoft.PowerFx.LanguageServerProtocol
                 switch (codeActionKind)
                 {
                     case CodeActionKind.QuickFix:
-
                         var scope = _scopeFactory.GetOrCreateInstance(documentUri);
-                        var scopeQuickFix = scope as IPowerFxScopeQuickFix;
 
-                        if (scopeQuickFix != null)
+                        if (scope is EditorContextScope scopeQuickFix)
                         {
-                            var result = scopeQuickFix.Suggest(expression);
+                            var result = scopeQuickFix.SuggestFixes(expression, LogUnhandledExceptionHandler);
 
                             var items = new List<CodeAction>();
 
@@ -341,7 +404,8 @@ namespace Microsoft.PowerFx.LanguageServerProtocol
                                     Edit = new WorkspaceEdit
                                     {
                                         Changes = new Dictionary<string, TextEdit[]> { { documentUri, new[] { new TextEdit { Range = range, NewText = item.Text } } } }
-                                    }
+                                    },
+                                    ActionResultContext = item.ActionResultContext
                                 });
                             }
 
@@ -356,6 +420,145 @@ namespace Microsoft.PowerFx.LanguageServerProtocol
             }
 
             _sendToClient(JsonRpcHelper.CreateSuccessResult(id, codeActions));
+        }
+
+        /// <summary>
+        /// Handles requests to compute semantic tokens for the full document or expression.
+        /// </summary>
+        /// <param name="id">Request Id.</param>
+        /// <param name="paramsJson">Request Params Stringified Body.</param>
+        private void HandleFullDocumentSemanticTokens(string id, string paramsJson)
+        {
+            if (!TryParseAndValidateSemanticTokenParams(id, paramsJson, out SemanticTokensParams semanticTokensParams))
+            {
+                return;
+            }
+
+            HandleSemanticTokens(id, semanticTokensParams, TextDocumentNames.FullDocumentSemanticTokens);
+        }
+
+        /// <summary>
+        /// Handles requests to compute semantic tokens for the a specific part of document or expression.
+        /// </summary>
+        /// <param name="id">Request Id.</param>
+        /// <param name="paramsJson">Request Params Stringified Body.</param>
+        private void HandleRangeDocumentSemanticTokens(string id, string paramsJson)
+        {
+            if (!TryParseAndValidateSemanticTokenParams(id, paramsJson, out SemanticTokensRangeParams semanticTokensParams))
+            {
+                return;
+            }
+
+            if (semanticTokensParams.Range == null)
+            {
+                // No tokens for invalid range
+                SendEmptySemanticTokensResponse(id);
+                return;
+            }
+
+            HandleSemanticTokens(id, semanticTokensParams, TextDocumentNames.RangeDocumentSemanticTokens);
+        }
+
+        private void HandleSemanticTokens<T>(string id, T semanticTokensParams, string method) 
+            where T : SemanticTokensParams
+        {
+            var uri = new Uri(semanticTokensParams.TextDocument.Uri);
+            var queryParams = HttpUtility.ParseQueryString(uri.Query);
+            var expression = queryParams?.Get("expression") ?? string.Empty;
+
+            if (string.IsNullOrEmpty(expression))
+            {
+                // Empty tokens for the empty expression
+                SendEmptySemanticTokensResponse(id);
+                return;
+            }
+
+            var isRangeSemanticTokensMethod = method == TextDocumentNames.RangeDocumentSemanticTokens;
+
+            // Monaco-Editor sometimes uses \r\n for the newline character. \n is not always the eol character so allowing clients to pass eol character
+            var eol = queryParams?.Get("eol");
+            eol = !string.IsNullOrEmpty(eol) ? eol : EOL.ToString();
+            
+            var startIndex = -1;
+            var endIndex = -1;
+            if (isRangeSemanticTokensMethod)
+            {
+                (startIndex, endIndex) = (semanticTokensParams as SemanticTokensRangeParams).Range.ConvertRangeToPositions(expression, eol);
+                if (startIndex < 0 || endIndex < 0)
+                {
+                    SendEmptySemanticTokensResponse(id);
+                    return;
+                }
+            }
+
+            var tokenTypesToSkip = ParseTokenTypesToSkipParam(queryParams?.Get("tokenTypesToSkip"));
+            var scope = _scopeFactory.GetOrCreateInstance(semanticTokensParams.TextDocument.Uri);
+            var result = scope?.Check(expression);
+            if (result == null)
+            {
+                SendEmptySemanticTokensResponse(id);
+                return;
+            }
+
+            // Skip over the token types that clients don't want in the response
+            var tokens = result.GetTokens().Where(tok => !tokenTypesToSkip.Contains(tok.TokenType));
+
+            if (isRangeSemanticTokensMethod)
+            {
+                // Only consider overlapping tokens. end index is exlcusive
+                tokens = tokens.Where(token => !(token.EndIndex <= startIndex || token.StartIndex >= endIndex));
+            }
+
+            var encodedTokens = SemanticTokensEncoder.EncodeTokens(tokens, expression, eol);
+            _sendToClient(JsonRpcHelper.CreateSuccessResult(id, new SemanticTokensResponse() { Data = encodedTokens }));
+        }
+
+        private HashSet<TokenType> ParseTokenTypesToSkipParam(string rawTokenTypesToSkipParam)
+        {
+            var tokenTypesToSkip = new HashSet<TokenType>();
+            if (string.IsNullOrWhiteSpace(rawTokenTypesToSkipParam))
+            {
+                return tokenTypesToSkip;
+            }
+
+            if (TryParseParams(rawTokenTypesToSkipParam, out List<int> tokenTypesToSkipParam))
+            {
+                foreach (var tokenTypeValue in tokenTypesToSkipParam)
+                {
+                    var tokenType = (TokenType)tokenTypeValue;
+                    if (tokenType != TokenType.Lim)
+                    {
+                        tokenType = tokenType == TokenType.Min ? TokenType.Unknown : tokenType;
+                        tokenTypesToSkip.Add(tokenType);
+                    }
+                }
+            }
+
+            return tokenTypesToSkip;
+        }
+
+        private bool TryParseAndValidateSemanticTokenParams<T>(string id, string paramsJson, out T semanticTokenParams)
+            where T : SemanticTokensParams
+        {
+            semanticTokenParams = null;
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                _sendToClient(JsonRpcHelper.CreateErrorResult(id, JsonRpcHelper.ErrorCode.InvalidRequest));
+                return false;
+            }
+
+            if (!TryParseParams(paramsJson, out semanticTokenParams) || string.IsNullOrWhiteSpace(semanticTokenParams?.TextDocument?.Uri))
+            {
+                _sendToClient(JsonRpcHelper.CreateErrorResult(id, JsonRpcHelper.ErrorCode.ParseError));
+                return false;
+            }
+
+            return true;
+        }
+
+        private void SendEmptySemanticTokensResponse(string id)
+        {
+            _sendToClient(JsonRpcHelper.CreateSuccessResult(id, new SemanticTokensResponse()));
         }
 
         private CompletionItemKind GetCompletionItemKind(SuggestionKind kind)
@@ -399,14 +602,14 @@ namespace Microsoft.PowerFx.LanguageServerProtocol
         /// <returns>
         /// <see cref="DiagnosticSeverity"/> equivalent to <see cref="DocumentErrorSeverity"/>.
         /// </returns>
-        private DiagnosticSeverity DocumentSeverityToDiagnosticSeverityMap(DocumentErrorSeverity severity) => severity switch
+        private DiagnosticSeverity DocumentSeverityToDiagnosticSeverityMap(ErrorSeverity severity) => severity switch
         {
-            DocumentErrorSeverity.Critical => DiagnosticSeverity.Error,
-            DocumentErrorSeverity.Severe => DiagnosticSeverity.Error,
-            DocumentErrorSeverity.Moderate => DiagnosticSeverity.Error,
-            DocumentErrorSeverity.Warning => DiagnosticSeverity.Warning,
-            DocumentErrorSeverity.Suggestion => DiagnosticSeverity.Hint,
-            DocumentErrorSeverity.Verbose => DiagnosticSeverity.Information,
+            ErrorSeverity.Critical => DiagnosticSeverity.Error,
+            ErrorSeverity.Severe => DiagnosticSeverity.Error,
+            ErrorSeverity.Moderate => DiagnosticSeverity.Error,
+            ErrorSeverity.Warning => DiagnosticSeverity.Warning,
+            ErrorSeverity.Suggestion => DiagnosticSeverity.Hint,
+            ErrorSeverity.Verbose => DiagnosticSeverity.Information,
             _ => DiagnosticSeverity.Information
         };
 
@@ -420,29 +623,9 @@ namespace Microsoft.PowerFx.LanguageServerProtocol
             {
                 foreach (var item in errors)
                 {
-                    var span = item.Span;
-                    var startCode = expression.Substring(0, span.Min);
-                    var code = expression.Substring(span.Min, span.Lim - span.Min);
-                    var startLine = startCode.Split(EOL).Length;
-                    var startChar = GetCharPosition(expression, span.Min);
-                    var endLine = startLine + code.Split(EOL).Length - 1;
-                    var endChar = GetCharPosition(expression, span.Lim) - 1;
-
                     diagnostics.Add(new Diagnostic()
                     {
-                        Range = new Protocol.Range()
-                        {
-                            Start = new Position()
-                            {
-                                Character = startChar,
-                                Line = startLine
-                            },
-                            End = new Position()
-                            {
-                                Character = endChar,
-                                Line = endLine
-                            }
-                        },
+                        Range = GetRange(expression, item.Span),
                         Message = item.Message,
                         Severity = DocumentSeverityToDiagnosticSeverityMap(item.Severity)
                     });
@@ -457,6 +640,41 @@ namespace Microsoft.PowerFx.LanguageServerProtocol
                     Uri = uri,
                     Diagnostics = diagnostics.ToArray()
                 }));
+        }
+
+        /// <summary>
+        /// Construct a Range based on a Span for a given expression.
+        /// </summary>
+        /// <param name="expression">The expression.</param>
+        /// <param name="span">The Span.</param>
+        /// <returns>Generated Range.</returns>
+        public static Range GetRange(string expression, Span span)
+        {
+            var startChar = GetCharPosition(expression, span.Min) - 1;
+            var endChar = GetCharPosition(expression, span.Lim) - 1;
+
+            var startCode = expression.Substring(0, span.Min);
+            var code = expression.Substring(span.Min, span.Lim - span.Min);
+            var startLine = startCode.Split(EOL).Length;
+            var endLine = startLine + code.Split(EOL).Length - 1;
+
+            var range = new Range()
+            {
+                Start = new Position()
+                {
+                    Character = startChar,
+                    Line = startLine
+                },
+                End = new Position()
+                {
+                    Character = endChar,
+                    Line = endLine
+                }
+            };
+
+            Contracts.Assert(range.IsValid());
+
+            return range;
         }
 
         private void PublishTokens(string documentUri, CheckResult result)
@@ -526,7 +744,7 @@ namespace Microsoft.PowerFx.LanguageServerProtocol
         /// <param name="expression">The expression content.</param>
         /// <param name="position">The charactor position (starts with 0).</param>
         /// <returns>The charactor position (starts with 1) from its line.</returns>
-        protected int GetCharPosition(string expression, int position)
+        protected static int GetCharPosition(string expression, int position)
         {
             Contracts.AssertValue(expression);
             Contracts.Assert(position >= 0);

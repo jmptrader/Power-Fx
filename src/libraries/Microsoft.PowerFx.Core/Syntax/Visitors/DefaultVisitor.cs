@@ -1,9 +1,7 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-using Microsoft.PowerFx.Core.Syntax.Nodes;
-
-namespace Microsoft.PowerFx.Core.Syntax.Visitors
+namespace Microsoft.PowerFx.Syntax
 {
     /// <summary>
     /// A base visitor for when you want a default result for most nodes.
@@ -42,6 +40,11 @@ namespace Microsoft.PowerFx.Core.Syntax.Visitors
             return Default;
         }
 
+        public override TResult Visit(DecLitNode node, TContext context)
+        {
+            return Default;
+        }
+
         public override TResult Visit(FirstNameNode node, TContext context)
         {
             return Default;
@@ -53,11 +56,6 @@ namespace Microsoft.PowerFx.Core.Syntax.Visitors
         }
 
         public override TResult Visit(SelfNode node, TContext context)
-        {
-            return Default;
-        }
-
-        public override TResult Visit(ReplaceableNode node, TContext context)
         {
             return Default;
         }

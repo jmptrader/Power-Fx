@@ -1,12 +1,11 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
-namespace Microsoft.PowerFx.Core.Texl.Intellisense
+namespace Microsoft.PowerFx.Intellisense
 {
     internal partial class Intellisense
     {
@@ -25,7 +24,7 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
                 Contracts.AssertValue(intellisenseData);
                 Contracts.AssertValue(intellisenseData.CurNode);
 
-                if (intellisenseData.CurNode.Kind != NodeKind.StrLit && intellisenseData.CurNode.Kind != NodeKind.NumLit)
+                if (intellisenseData.CurNode.Kind != NodeKind.StrLit && intellisenseData.CurNode.Kind != NodeKind.NumLit && intellisenseData.CurNode.Kind != NodeKind.DecLit)
                 {
                     return false;
                 }
@@ -38,8 +37,8 @@ namespace Microsoft.PowerFx.Core.Texl.Intellisense
                 if (cursorPos > tokenSpan.Lim && IntellisenseHelper.CanSuggestAfterValue(cursorPos, intellisenseData.Script))
                 {
                     // Cursor is after the current node's token.
-                    // Suggest binary kewords.
-                    var operandType = curNode.Kind == NodeKind.StrLit ? DType.String : DType.Number;
+                    // Suggest binary keywords.
+                    var operandType = curNode.Kind == NodeKind.StrLit ? DType.String : (curNode.Kind == NodeKind.DecLit ? DType.Decimal : DType.Number);
                     IntellisenseHelper.AddSuggestionsForAfterValue(intellisenseData, operandType);
                 }
                 else if (cursorPos > tokenSpan.Min)

@@ -1,10 +1,10 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-namespace Microsoft.PowerFx.Core.Syntax
+namespace Microsoft.PowerFx.Syntax
 {
     // Node kinds. Primarily used by Intellisense.
-    internal enum NodeKind
+    public enum NodeKind
     {
         Blank,
 
@@ -27,7 +27,7 @@ namespace Microsoft.PowerFx.Core.Syntax
         BoolLit,
         NumLit,
         StrLit,
-        Replaceable,
+        DecLit,
 
         Error,
         StrInterp

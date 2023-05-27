@@ -6,6 +6,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
+using Microsoft.PowerFx.Core.Parser;
+using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Types;
 using Xunit.Sdk;
 
 namespace Microsoft.PowerFx.Core.Tests
@@ -21,12 +25,14 @@ namespace Microsoft.PowerFx.Core.Tests
         private readonly string _filePathCommon;
         private readonly string _filePathSpecific;
         private readonly string _engineName;
-        
-        public TxtFileDataAttribute(string filePathCommon, string filePathSpecific, string engineName)
+        private readonly Dictionary<string, bool> _setup;
+
+        public TxtFileDataAttribute(string filePathCommon, string filePathSpecific, string engineName, string setup)
         {
             _filePathCommon = filePathCommon;
             _filePathSpecific = filePathSpecific;
             _engineName = engineName;
+            _setup = TestRunner.ParseSetupString(setup);
         }
 
         public override IEnumerable<object[]> GetData(MethodInfo testMethod)
@@ -47,11 +53,19 @@ namespace Microsoft.PowerFx.Core.Tests
 
                 foreach (var dir in new string[] { _filePathCommon, _filePathSpecific })
                 {
-                    var allFiles = Directory.EnumerateFiles(GetDefaultTestDir(dir));
-
-                    foreach (var file in allFiles)
+                    if (dir != null)
                     {
-                        parser.AddFile(file);
+                        var allFiles = Directory.EnumerateFiles(GetDefaultTestDir(dir));
+
+                        foreach (var file in allFiles)
+                        {
+                            // Skip .md files
+
+                            if (file.EndsWith(".txt", StringComparison.InvariantCultureIgnoreCase))
+                            {
+                                parser.AddFile(_setup, file);
+                            }
+                        }
                     }
                 }
 
@@ -77,7 +91,7 @@ namespace Microsoft.PowerFx.Core.Tests
         }
 
         internal static string GetDefaultTestDir(string filePath)
-        { 
+        {
             var executable = new Uri(Assembly.GetExecutingAssembly().CodeBase).LocalPath;
             var curDir = Path.GetFullPath(Path.GetDirectoryName(executable));
             var testDir = Path.Combine(curDir, filePath);

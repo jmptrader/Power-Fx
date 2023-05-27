@@ -3,13 +3,13 @@
 
 using Microsoft.PowerFx.Core.Binding;
 using Microsoft.PowerFx.Core.Logging.Trackers;
-using Microsoft.PowerFx.Core.Syntax;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
 namespace Microsoft.PowerFx.Core.Functions.FunctionArgValidators
 {
+    [ThreadSafeImmutable]
     internal sealed class SortOrderValidator : IArgValidator<string>
     {
         public bool TryGetValidValue(TexlNode argNode, TexlBinding binding, out string validatedOrder)
@@ -47,7 +47,7 @@ namespace Microsoft.PowerFx.Core.Functions.FunctionArgValidators
             Contracts.AssertValue(order);
 
             validatedSortOrder = string.Empty;
-            order = order.ToLower();
+            order = order.ToLowerInvariant();
             if (order != LanguageConstants.AscendingSortOrderString && order != LanguageConstants.DescendingSortOrderString)
             {
                 return false;
@@ -119,7 +119,7 @@ namespace Microsoft.PowerFx.Core.Functions.FunctionArgValidators
                 return false;
             }
 
-            if (!binding.NameResolver.TryLookupEnum(new DName(LanguageConstants.SortOrderEnumStringInvariant), out var lookupInfo))
+            if (!binding.NameResolver.TryLookupEnum(new DName(LanguageConstants.SortOrderEnumString), out var lookupInfo))
             {
                 return false;
             }

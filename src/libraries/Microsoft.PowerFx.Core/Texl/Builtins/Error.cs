@@ -7,9 +7,13 @@ using Microsoft.PowerFx.Core.App.ErrorContainers;
 using Microsoft.PowerFx.Core.Errors;
 using Microsoft.PowerFx.Core.Functions;
 using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
+using Microsoft.PowerFx.Core.Types.Enums;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
+
+#pragma warning disable SA1402 // File may only contain a single type
+#pragma warning disable SA1649 // File name should match first type name
 
 namespace Microsoft.PowerFx.Core.Texl.Builtins
 {
@@ -18,13 +22,9 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
     {
         public override bool HasPreciseErrors => true;
 
-        public override bool RequiresErrorContext => true;
-
         public override bool CanSuggestInputColumns => true;
 
         public override bool IsSelfContained => true;
-
-        public override bool SupportsParamCoercion => true;
 
         public ErrorFunction()
             : base("Error", TexlStrings.AboutError, FunctionCategories.Logical, DType.ObjNull, 0, 1, 1)
@@ -36,7 +36,12 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             yield return new[] { TexlStrings.ErrorArg1 };
         }
 
-        public override bool CheckInvocation(TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
+        public override IEnumerable<string> GetRequiredEnumNames()
+        {
+            return new List<string>() { LanguageConstants.ErrorKindEnumString };
+        }
+
+        public override bool CheckTypes(CheckTypesContext context, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
         {
             Contracts.AssertValue(args);
             Contracts.AssertAllValues(args);
@@ -49,7 +54,6 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             var acceptedFields = reifiedError.GetNames(DPath.Root);
             var requiredKindField = acceptedFields.Where(tn => tn.Name == "Kind").First();
             Contracts.Assert(requiredKindField.Type.IsEnum || requiredKindField.Type.Kind == DKind.Number);
-            var optionalFields = acceptedFields.Where(tn => tn.Name != "Kind");
 
             returnType = DType.ObjNull;
             nodeToCoercedTypeMap = null;
@@ -57,10 +61,16 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             var argument = args[0];
             var argumentType = argTypes[0];
 
-            if (argumentType.Kind != DKind.Record && argumentType.Kind != DKind.Table)
+            if (argumentType.Kind != DKind.Record && argumentType.Kind != DKind.Table && argumentType.Kind != DKind.String)
             {
                 errors.EnsureError(argument, TexlStrings.ErrBadType);
                 return false;
+            }
+
+            // Custom error message
+            if (argumentType.Kind == DKind.String)
+            {
+                return true;
             }
 
             // We cache the whole name list regardless of path.
@@ -83,22 +93,12 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             }
 
             var argumentKindType = names.First(tn => tn.Name == requiredKindField.Name).Type;
-            if (argumentKindType.Kind != requiredKindField.Type.Kind)
+            if (argumentKindType.IsEnum)
             {
-                errors.EnsureError(
-                    argument,
-                    TexlStrings.ErrBadSchema_ExpectedType,
-                    reifiedError.GetKindString());
-                errors.Error(
-                    argument,
-                    TexlStrings.ErrBadRecordFieldType_FieldName_ExpectedType,
-                    requiredKindField.Name.Value,
-                    "ErrorKind");
-                return false;
+                argumentKindType = argumentKindType.GetEnumSupertype();
             }
 
             var valid = true;
-
             var record = argument.AsRecord();
             foreach (var name in names)
             {
@@ -118,29 +118,20 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
                 }
             }
 
-            bool matchedWithCoercion;
             bool typeValid;
+
+            var expectedOptionalFields = DType.CreateTable(
+                    acceptedFields.Where(field =>
+
+                        // Kind has already been handled before
+                        ((requiredKindField.Type.Kind == DKind.Number) ? true : field.Name != "Kind") && names.Any(name => name.Name == field.Name)));
+
             if (argumentType.Kind == DKind.Record)
             {
-                // A record with the proper types for the fields that are specified.
-                var expectedOptionalFieldsRecord = DType.CreateRecord(
-                    acceptedFields.Where(field =>
-
-                        // Kind has already been handled before
-                        field.Name != "Kind" && names.Any(name => name.Name == field.Name)));
-
-                typeValid = CheckType(argument, argumentType, expectedOptionalFieldsRecord, errors, true, out matchedWithCoercion);
+                expectedOptionalFields = expectedOptionalFields.ToRecord();
             }
-            else
-            {
-                // A table with the proper types for the fields that are specified.
-                var expectedOptionalFieldsTable = DType.CreateTable(
-                    acceptedFields.Where(field =>
 
-                        // Kind has already been handled before
-                        field.Name != "Kind" && names.Any(name => name.Name == field.Name)));
-                typeValid = CheckType(argument, argumentType, expectedOptionalFieldsTable, errors, true, out matchedWithCoercion);
-            }
+            typeValid = CheckType(context, argument, argumentType, expectedOptionalFields, errors, true, out bool matchedWithCoercion);
 
             if (!typeValid)
             {
@@ -160,3 +151,6 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
         }
     }
 }
+
+#pragma warning restore SA1402 // File may only contain a single type
+#pragma warning restore SA1649 // File name should match first type name

@@ -1,149 +1,103 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Microsoft.PowerFx.Core;
-using Microsoft.PowerFx.Core.Public.Types;
-using Microsoft.PowerFx.Core.Public.Values;
-using Microsoft.PowerFx.Core.Types;
-using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Core.Tests;
+using Microsoft.PowerFx.Types;
 using Xunit;
-using Xunit.Sdk;
 
 namespace Microsoft.PowerFx.Interpreter.Tests
 {
     public class DisplayNameTests
     {
         [Fact]
-        public void CollisionsThrow()
+        public void DisplayNameTest_DropColumns()
         {
-            var engine = new RecalcEngine();
-            var r1 = new RecordType()
-                .Add(new NamedFormulaType("Num", FormulaType.Number, new DName("DisplayNum")));
+            var pfxConfig = new PowerFxConfig(new Features { SupportColumnNamesAsIdentifiers = true });
+            var engine = new RecalcEngine(pfxConfig);
 
-            Assert.Throws<NameCollisionException>(() => r1.Add(new NamedFormulaType("DisplayNum", FormulaType.Date, "NoCollision")));
-            Assert.Throws<NameCollisionException>(() => r1.Add(new NamedFormulaType("NoCollision", FormulaType.Date, "DisplayNum")));
-            Assert.Throws<NameCollisionException>(() => r1.Add(new NamedFormulaType("NoCollision", FormulaType.Date, "Num")));
+            var recordType = RecordType.Empty()
+                .Add(new NamedFormulaType("logicalA", FormulaType.Number, displayName: "displayName"))
+                .Add(new NamedFormulaType("logicalB", FormulaType.Number, displayName: "displayName2"));
+
+            var rv1 = RecordValue.NewRecordFromFields(
+                new NamedValue("logicalA", FormulaValue.New(1)),
+                new NamedValue("logicalB", FormulaValue.New(4)));
+            var rv2 = RecordValue.NewRecordFromFields(
+                new NamedValue("logicalA", FormulaValue.New(2)),
+                new NamedValue("logicalB", FormulaValue.New(5)));
+            var rv3 = RecordValue.NewRecordFromFields(
+                new NamedValue("logicalA", FormulaValue.New(3)),
+                new NamedValue("logicalB", FormulaValue.New(6)));
+
+            var tv = TableValue.NewTable(recordType, rv1, rv2, rv3);
+
+            var parameters = RecordValue.NewRecordFromFields(
+                new NamedValue("myTable", tv));
+
+            var result = engine.Eval("DropColumns(myTable, displayName)", parameters);
+
+            Assert.Equal("*[logicalB`displayName2:n]", result.Type.ToStringWithDisplayNames());
+
+            var output = result.ToExpression();
+
+            Assert.Equal("Table({logicalB:Float(4)},{logicalB:Float(5)},{logicalB:Float(6)})", output);
+
+            var displayExpression = engine.GetDisplayExpression("DropColumns(myTable, displayName)", parameters.Type);
+            var invariantExpression = engine.GetInvariantExpression("DropColumns(myTable, displayName)", parameters.Type);
+
+            Assert.Equal("DropColumns(myTable, displayName)", displayExpression);
+            Assert.Equal("DropColumns(myTable, logicalA)", invariantExpression);
+
+            var resultD = engine.Eval(displayExpression, parameters);
+            var resultI = engine.Eval(invariantExpression, parameters);
+
+            Assert.Equal("*[logicalB`displayName2:n]", resultD.Type.ToStringWithDisplayNames());
+            Assert.Equal("*[logicalB`displayName2:n]", resultI.Type.ToStringWithDisplayNames());
         }
 
         [Fact]
-        public void ImmutableDisplayNameProvider()
+        public void DisplayNameTest_AddColumns()
         {
-            var r1 = new RecordType();
+            var pfxConfig = new PowerFxConfig(new Features { SupportColumnNamesAsIdentifiers = true });
+            var engine = new RecalcEngine(pfxConfig);
 
-            var r2 = r1.Add(new NamedFormulaType("Logical", FormulaType.String, "Foo"));
-            var r3 = r1.Add(new NamedFormulaType("Logical", FormulaType.String, "Bar"));
+            var recordType = RecordType.Empty()
+                .Add(new NamedFormulaType("logicalA", FormulaType.Number, displayName: "displayName"))
+                .Add(new NamedFormulaType("logicalB", FormulaType.Number, displayName: "displayName2"));
 
-            Assert.False(ReferenceEquals(r2._type.DisplayNameProvider, r3._type.DisplayNameProvider));
-        }
+            var rv1 = RecordValue.NewRecordFromFields(
+                new NamedValue("logicalA", FormulaValue.New(1)),
+                new NamedValue("logicalB", FormulaValue.New(4)));
+            var rv2 = RecordValue.NewRecordFromFields(
+                new NamedValue("logicalA", FormulaValue.New(2)),
+                new NamedValue("logicalB", FormulaValue.New(5)));
+            var rv3 = RecordValue.NewRecordFromFields(
+                new NamedValue("logicalA", FormulaValue.New(3)),
+                new NamedValue("logicalB", FormulaValue.New(6)));
 
-        [Fact]
-        public void DisableDisplayNames()
-        {
-            var r1 = new RecordType()
-                .Add(new NamedFormulaType("Logical", FormulaType.String, "Foo"));
+            var tv = TableValue.NewTable(recordType, rv1, rv2, rv3);
+            var parameters = RecordValue.NewRecordFromFields(new NamedValue("myTable", tv));
+            var result = engine.Eval("AddColumns(myTable, newColumn, displayName * logicalB)", parameters);
 
-            var r2 = new RecordType()
-                .Add(new NamedFormulaType("Other", FormulaType.String, "Foo"));
+            Assert.Equal("*[logicalA`displayName:n, logicalB`displayName2:n, newColumn:n]", result.Type.ToStringWithDisplayNames());
 
-            Assert.IsType<SingleSourceDisplayNameProvider>(r1._type.DisplayNameProvider);
+            var output = result.ToExpression();
 
-            var disabledType = DType.AttachOrDisableDisplayNameProvider(r1._type, r2._type.DisplayNameProvider);
+            Assert.Equal("Table({logicalA:Float(1),logicalB:Float(4),newColumn:Float(4)},{logicalA:Float(2),logicalB:Float(5),newColumn:Float(10)},{logicalA:Float(3),logicalB:Float(6),newColumn:Float(18)})", output);
 
-            Assert.IsType<DisabledDisplayNameProvider>(disabledType.DisplayNameProvider);
-        }
+            var displayExpression = engine.GetDisplayExpression("AddColumns(myTable, newColumn, displayName * logicalB)", parameters.Type);
+            var invariantExpression = engine.GetInvariantExpression("AddColumns(myTable, newColumn, displayName * logicalB)", parameters.Type);
 
-        [Theory]
-        [InlineData("If(B, Num, 1234)", "If(DisplayB, DisplayNum, 1234)", true)]
-        [InlineData("If(DisplayB, DisplayNum, 1234)", "If(DisplayB, DisplayNum, 1234)", true)]
-        [InlineData("If(DisplayB, Num, 1234)", "If(DisplayB, DisplayNum, 1234)", true)]
-        [InlineData("Sum(Nested, Inner)", "Sum(NestedDisplay, InnerDisplay)", true)]
-        [InlineData("Sum(Nested /* The source */ , Inner /* Sum over the InnerDisplay column */)", "Sum(NestedDisplay /* The source */ , InnerDisplay /* Sum over the InnerDisplay column */)", true)]
-        [InlineData("If(DisplayB, DisplayNum, 1234)", "If(B, Num, 1234)", false)]
-        [InlineData("If(B, Num, 1234)", "If(B, Num, 1234)", false)]
-        [InlineData("If(DisplayB, Num, 1234)", "If(B, Num, 1234)", false)]
-        [InlineData("Sum(NestedDisplay, InnerDisplay)", "Sum(Nested, Inner)", false)]
-        [InlineData("Sum(NestedDisplay /* The source */ , InnerDisplay /* Sum over the InnerDisplay column */)", "Sum(Nested /* The source */ , Inner /* Sum over the InnerDisplay column */)", false)]
-        public void ValidateDisplayNames(string inputExpression, string outputExpression, bool toDisplay)
-        {
-            var engine = new RecalcEngine();
-            var r1 = new RecordType()
-                .Add(new NamedFormulaType("Num", FormulaType.Number, "DisplayNum"))
-                .Add(new NamedFormulaType("B", FormulaType.Boolean, "DisplayB"))
-                .Add(new NamedFormulaType(
-                    "Nested", 
-                    new TableType().Add(new NamedFormulaType("Inner", FormulaType.Number, "InnerDisplay")), 
-                    "NestedDisplay"));
+            Assert.Equal("AddColumns(myTable, newColumn, displayName * displayName2)", displayExpression);
+            Assert.Equal("AddColumns(myTable, newColumn, logicalA * logicalB)", invariantExpression);
 
-            if (toDisplay)
-            {
-                var outDisplayExpression = engine.GetDisplayExpression(inputExpression, r1);
-                Assert.Equal(outputExpression, outDisplayExpression);
-            }
-            else
-            {
-                var outInvariantExpression = engine.GetInvariantExpression(outputExpression, r1);
-                Assert.Equal(outputExpression, outInvariantExpression);
-            }
-        }
+            var resultD = engine.Eval(displayExpression, parameters);
+            var resultI = engine.Eval(invariantExpression, parameters);
 
-        [Fact]
-        public void ConvertToDisplayNamesNoNames()
-        {
-            var engine = new RecalcEngine();
-            var r1 = new RecordType()
-                .Add(new NamedFormulaType("Num", FormulaType.Number))
-                .Add(new NamedFormulaType("B", FormulaType.Boolean));
-
-            var displayExpressions = engine.GetDisplayExpression("If(B, Num, 1234)", r1);
-
-            Assert.Equal("If(B, Num, 1234)", displayExpressions);
-        }
-
-        [Fact]
-        public void ConvertToInvariantNamesNoNames()
-        {
-            var engine = new RecalcEngine();
-            var r1 = new RecordType()
-                .Add(new NamedFormulaType("Num", FormulaType.Number))
-                .Add(new NamedFormulaType("B", FormulaType.Boolean));
-
-            var displayExpressions = engine.GetInvariantExpression("If(B, Num, 1234)", r1);
-
-            Assert.Equal("If(B, Num, 1234)", displayExpressions);
-        }
-
-        [Theory]
-        [InlineData("OptionSet.Option1 <> OptionSet.Option2", "OptionSet.option_1 <> OptionSet.option_2", false)]
-        [InlineData("OptionSet.option_1 <> OptionSet.option_2", "OptionSet.Option1 <> OptionSet.Option2", true)]
-        [InlineData("OptionSet.option_1 <> OptionSet.Option2", "OptionSet.Option1 <> OptionSet.Option2", true)]
-        [InlineData("OptionSet.Option1 <> OptionSet.option_2", "OptionSet.option_1 <> OptionSet.option_2", false)]
-        public void OptionSetDisplayNames(string inputExpression, string outputExpression, bool toDisplay)
-        {            
-            var config = new PowerFxConfig(null);
-            var optionSet = new OptionSet("OptionSet", new Dictionary<string, string>() 
-            {
-                    { "option_1", "Option1" },
-                    { "option_2", "Option2" }
-            });
-
-            config.AddOptionSet(optionSet);
-            
-            var engine = new RecalcEngine(config);
-
-            if (toDisplay)
-            {
-                var outDisplayExpression = engine.GetDisplayExpression(inputExpression, new RecordType());
-                Assert.Equal(outputExpression, outDisplayExpression);
-            }
-            else
-            {
-                var outInvariantExpression = engine.GetInvariantExpression(outputExpression, new RecordType());
-                Assert.Equal(outputExpression, outInvariantExpression);
-            }        
+            Assert.Equal("*[logicalA`displayName:n, logicalB`displayName2:n, newColumn:n]", resultD.Type.ToStringWithDisplayNames());
+            Assert.Equal("*[logicalA`displayName:n, logicalB`displayName2:n, newColumn:n]", resultI.Type.ToStringWithDisplayNames());
         }
     }
 }

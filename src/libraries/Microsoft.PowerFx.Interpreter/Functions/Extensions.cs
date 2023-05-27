@@ -1,0 +1,96 @@
+﻿// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
+using System;
+using Microsoft.PowerFx.Core.App.ErrorContainers;
+using Microsoft.PowerFx.Core.Errors;
+using Microsoft.PowerFx.Core.Localization;
+using Microsoft.PowerFx.Core.Types;
+using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
+
+namespace Microsoft.PowerFx.Functions
+{
+    internal static class Extensions
+    {
+        internal static bool IsValid(this DateTime dateTime, EvalVisitor runner)
+        {
+            return IsValid(dateTime, runner.TimeZoneInfo);
+        }
+
+        internal static bool IsValid(this DateTime dateTime, TimeZoneInfo tzi)
+        {
+            // If DateTime is UTC, the time is always valid
+            if (dateTime.Kind == DateTimeKind.Utc)
+            {
+                return true;
+            }
+
+            // Check if the time exists in this time zone            
+            // https://www.timeanddate.com/time/change/usa/seattle?year=2023
+            // 12 Mar 2023 02:10:00 is invalid            
+            if (tzi.IsInvalidTime(dateTime))
+            {
+                return false;
+            }
+
+            // ambiguous times (like 5 Nov 2023 01:10:00 is ambiguous in PST timezone) will be considered valid
+            return true;
+        }
+
+        /// <summary>
+        /// Checks if all names within an aggregate DType exists.
+        /// </summary>
+        /// <param name="argType">Record DType.</param>
+        /// <param name="dataSourceType">Table DType.</param>
+        /// <param name="arg">Arg node.</param>
+        /// <param name="errors">Error object reference.</param>
+        /// <param name="supportsParamCoercion">Does the caller function support coercion.</param>
+        /// <param name="usePowerFxV1CompatibilityRules">Use PFx v1 compatibility rules if enabled (less
+        /// permissive Accepts relationships).</param>
+        /// <returns></returns>
+        internal static bool CheckAggregateNames(this DType argType, DType dataSourceType, TexlNode arg, IErrorContainer errors, bool supportsParamCoercion = false, bool usePowerFxV1CompatibilityRules = false)
+        {
+            bool isValid = true;
+
+            foreach (var typedName in argType.GetNames(DPath.Root))
+            {
+                DName name = typedName.Name;
+                DType type = typedName.Type;
+
+                if (!dataSourceType.TryGetType(name, out DType dsNameType))
+                {
+                    dataSourceType.ReportNonExistingName(FieldNameKind.Display, errors, typedName.Name, arg);
+                    isValid = false;
+                    continue;
+                }
+
+                // For patching entities, we expand the type and drop entities and attachments for the purpose of comparison.
+                if (dsNameType.Kind == DKind.DataEntity && type.Kind != DKind.DataEntity)
+                {
+                    if (dsNameType.TryGetExpandedEntityTypeWithoutDataSourceSpecificColumns(out var expandedType))
+                    {
+                        dsNameType = expandedType;
+                    }
+                }
+
+                if (!dsNameType.Accepts(type, out var schemaDifference, out var schemaDifferenceType, exact: true, useLegacyDateTimeAccepts: false, usePowerFxV1CompatibilityRules: usePowerFxV1CompatibilityRules) &&
+                    (!supportsParamCoercion || !type.CoercesTo(dsNameType, out var coercionIsSafe, aggregateCoercion: false, isTopLevelCoercion: false, usePowerFxV1CompatibilityRules: usePowerFxV1CompatibilityRules)))
+                {
+                    if (dsNameType.Kind == type.Kind)
+                    {
+                        errors.Errors(arg, type, schemaDifference, schemaDifferenceType);
+                    }
+                    else
+                    {
+                        errors.EnsureError(DocumentErrorSeverity.Severe, arg, TexlStrings.ErrTypeError_Arg_Expected_Found, name, dsNameType.GetKindString(), type.GetKindString());
+                    }
+
+                    isValid = false;
+                }
+            }
+
+            return isValid;
+        }
+    }
+}

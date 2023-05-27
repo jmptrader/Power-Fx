@@ -1,12 +1,14 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.PowerFx.Core.Errors;
 using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
 namespace Microsoft.PowerFx.Core.App.ErrorContainers
 {
@@ -15,6 +17,18 @@ namespace Microsoft.PowerFx.Core.App.ErrorContainers
         private List<TexlError> _errors;
 
         public DocumentErrorSeverity DefaultSeverity => DocumentErrorSeverity.Critical;
+
+        public void MergeErrors(IEnumerable<TexlError> errors)
+        {
+            if (_errors == null)
+            {
+                _errors = new List<TexlError>();
+            }
+
+            errors = errors.Where(e => !HasErrors(e.Node, e.Severity)).ToList();
+
+            _errors.AddRange(errors);
+        }
 
         public bool HasErrors()
         {
@@ -33,6 +47,26 @@ namespace Microsoft.PowerFx.Core.App.ErrorContainers
             foreach (var err in _errors)
             {
                 if (err.Node == node && err.Severity >= severity)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public bool HasErrors(Token token, DocumentErrorSeverity severity = DocumentErrorSeverity.Suggestion)
+        {
+            Contracts.AssertValue(token);
+
+            if (CollectionUtils.Size(_errors) == 0)
+            {
+                return false;
+            }
+
+            foreach (var err in _errors)
+            {
+                if (err.Tok == token && err.Severity >= severity)
                 {
                     return true;
                 }
@@ -86,6 +120,21 @@ namespace Microsoft.PowerFx.Core.App.ErrorContainers
         public TexlError EnsureError(TexlNode node, ErrorResourceKey errKey, params object[] args)
         {
             return EnsureError(DefaultSeverity, node, errKey, args);
+        }
+
+        public TexlError EnsureError(DocumentErrorSeverity severity, Token token, ErrorResourceKey errKey, params object[] args)
+        {
+            Contracts.AssertValue(token);
+            Contracts.AssertValue(args);
+
+            if (!HasErrors(token, severity))
+            {
+                var err = new TexlError(token, severity, errKey, args);
+                CollectionUtils.Add(ref _errors, err);
+                return err;
+            }
+
+            return null;
         }
 
         public TexlError EnsureError(DocumentErrorSeverity severity, TexlNode node, ErrorResourceKey errKey, params object[] args)

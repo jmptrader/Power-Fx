@@ -17,7 +17,9 @@ namespace Microsoft.PowerFx.Core
         private readonly ImmutableDictionary<DName, DName> _logicalToDisplay;
         private readonly ImmutableDictionary<DName, DName> _displayToLogical;
 
-        public SingleSourceDisplayNameProvider()
+        public override IEnumerable<KeyValuePair<DName, DName>> LogicalToDisplayPairs => _logicalToDisplay;
+
+        internal SingleSourceDisplayNameProvider()
         {
             _logicalToDisplay = ImmutableDictionary.Create<DName, DName>();
             _displayToLogical = ImmutableDictionary.Create<DName, DName>();
@@ -45,13 +47,13 @@ namespace Microsoft.PowerFx.Core
             _displayToLogical = dToLBuilder.ToImmutable();
         }
 
-        private SingleSourceDisplayNameProvider(ImmutableDictionary<DName, DName> logicalToDisplay, ImmutableDictionary<DName, DName> displayToLogical)
+        internal SingleSourceDisplayNameProvider(ImmutableDictionary<DName, DName> logicalToDisplay, ImmutableDictionary<DName, DName> displayToLogical)
         {
             _logicalToDisplay = logicalToDisplay;
             _displayToLogical = displayToLogical;
         }
 
-        public SingleSourceDisplayNameProvider AddField(DName logicalName, DName displayName)
+        internal SingleSourceDisplayNameProvider AddField(DName logicalName, DName displayName)
         {
             // Check for collisions between display and logical names
             if (_displayToLogical.ContainsKey(logicalName) || _logicalToDisplay.ContainsKey(logicalName) ||
@@ -76,10 +78,27 @@ namespace Microsoft.PowerFx.Core
             return _logicalToDisplay.TryGetValue(logicalName, out displayName);
         }
 
-        public override bool TryRemapLogicalAndDisplayNames(DName displayName, out DName logicalName, out DName newDisplayName)
+        /// <summary>
+        /// Removes field based on given <paramref name="lookupName"/>.
+        /// </summary>
+        /// <param name="lookupName"> logical or display name of the field.</param>
+        /// <returns></returns>
+        public SingleSourceDisplayNameProvider RemoveField(DName lookupName)
         {
-            newDisplayName = displayName;
-            return TryGetLogicalName(displayName, out logicalName);
+            if (_logicalToDisplay.TryGetValue(lookupName, out var displayName))
+            {
+                var logicalToDisplay = _logicalToDisplay.Remove(lookupName);
+                var displayToLogic = _displayToLogical.Remove(displayName);
+                return new SingleSourceDisplayNameProvider(logicalToDisplay, displayToLogic);
+            }
+            else if (_displayToLogical.TryGetValue(lookupName, out var logicalName))
+            {
+                var displayToLogic = _displayToLogical.Remove(lookupName);
+                var logicalToDisplay = _logicalToDisplay.Remove(logicalName);
+                return new SingleSourceDisplayNameProvider(logicalToDisplay, displayToLogic);
+            }
+
+            return this;
         }
     }
 }

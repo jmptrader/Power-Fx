@@ -1,13 +1,13 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
-using Microsoft.PowerFx.Core.Lexer.Tokens;
 using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
 namespace Microsoft.PowerFx.Core.Errors
 {
@@ -59,10 +59,11 @@ namespace Microsoft.PowerFx.Core.Errors
             _nameMapIDs.Add(name.Value);
         }
 
-        protected override void FormatCore(StringBuilder sb)
+        internal override void FormatCore(StringBuilder sb)
         {
             Contracts.AssertValue(sb);
 
+            // $$$ can't use current culture
             sb.AppendFormat(CultureInfo.CurrentCulture, TexlStrings.FormatSpan_Min_Lim(), Tok.Span.Min, Tok.Span.Lim);
 
             if (Node != null)

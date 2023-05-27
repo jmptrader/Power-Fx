@@ -3,15 +3,15 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Microsoft.PowerFx.Core.Errors;
-using Microsoft.PowerFx.Core.Lexer.Tokens;
 using Microsoft.PowerFx.Core.Localization;
 using Microsoft.PowerFx.Core.Parser;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
 
-namespace Microsoft.PowerFx.Core.Syntax
+namespace Microsoft.PowerFx.Syntax
 {
     /// <summary>
     /// This encapsulates a named formula: its original script, the parsed result, and any parse errors.
@@ -25,7 +25,7 @@ namespace Microsoft.PowerFx.Core.Syntax
 
         // The language settings used for parsing this script.
         // May be null if the script is to be parsed in the current locale.
-        public readonly ILanguageSettings Loc;
+        public readonly CultureInfo Loc;
 
         public bool IsParsed => _formulasResult != null;
 
@@ -40,7 +40,7 @@ namespace Microsoft.PowerFx.Core.Syntax
         /// </summary>
         /// <param name="script"></param>
         /// <param name="loc"></param>
-        public NamedFormulas(string script, ILanguageSettings loc = null)
+        public NamedFormulas(string script, CultureInfo loc = null)
         {
             Contracts.AssertValue(script);
             Contracts.AssertValueOrNull(loc);
@@ -53,13 +53,13 @@ namespace Microsoft.PowerFx.Core.Syntax
         /// Ensures that the named formulas have been parsed and if not, parses them.
         /// </summary>
         /// <returns>Tuple of IdentToken and formula.</returns>
-        public IEnumerable<(IdentToken token, Formula formula)> EnsureParsed()
+        public IEnumerable<(IdentToken token, Formula formula)> EnsureParsed(TexlParser.Flags flags = TexlParser.Flags.None)
         {
             if (_formulasResult == null)
             {
                 Contracts.AssertValue(Script);
                 Contracts.AssertValueOrNull(Loc);
-                var result = TexlParser.ParseFormulasScript(Script, loc: Loc);
+                var result = TexlParser.ParseFormulasScript(Script, loc: Loc, flags);
                 _formulasResult = result.NamedFormulas;
                 _errors = result.Errors;
                 HasParseErrors = result.HasError;

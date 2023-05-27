@@ -1,18 +1,4 @@
 ﻿
-
->> Average(1,0,5)
-2
-
->> Average("1",0,5) // coerce
-2
-
-// With new error semantics, blank yields error.
->> Average(Blank())
-#Error
-
->> Average(1,Blank(),5)
-3
-
 // scalar 
 >> Sum(1,2)
 3
@@ -34,48 +20,34 @@
 0
 
 >> Mod(7,Blank())
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> Mod(7,1/0)
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> Mod(1/0,3)
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> Mod(1, 0)
-#Error
+Error({Kind:ErrorKind.Div0})
 
->> Abs(-5)
-5
+>> Ln(10)
+2.30258509299404
 
->> Abs(5)
-5
+>> Ln(0.5)
+-0.69314718055994
 
->> Abs(0)
-0
-
->> Abs(Blank())
-Blank()
-
->> Abs(1/0)
-#Error
-
-// use Text to ignore precision issues
->> Text(Exp(Ln(2)), "#")
-"2"
-
->> Text(Ln(Exp(2)), "#")
-"2"
+>> Ln(1e-10)
+-23.02585092994045
 
 >> Ln(0)
-#Error
+Error({Kind:ErrorKind.Numeric})
 
 >> Ln(Blank())
-Blank()
+Error({Kind:ErrorKind.Numeric})
 
 >> Ln(1/0)
-#Error
-
+Error({Kind:ErrorKind.Div0})
 
 >> IsError(Ln(0))
 true
@@ -90,40 +62,34 @@ true
 0
 
 >> Sqrt(Blank())
-Blank()
+0
 
 >> Sqrt(1/0)
-#Error
+Error({Kind:ErrorKind.Div0})
+
+>> Sqrt(-2)
+Error({Kind:ErrorKind.Numeric})
 
 >> Power(2, -2)
 0.25
 
 >> Power(Blank(), -2)
-Blank()
+Error({Kind:ErrorKind.Div0})
+
+>> Power(Blank(), 2)
+0
+
+>> Power(3, Blank())
+1
 
 >> Power(1/0, -2)
-#Error
-
->> Round(Exp(2), 2)
-7.39
-
->> Exp(Blank())
-Blank()
-
->> Exp(1/0)
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> 2^3
 8
 
 >> 2^-2
 0.25
-
->> Max(Blank(), 100, -5, "2000", Value("2001"), Text(2002))
-2002
-
->> Min(-100, If(true, -1000, 200))
--1000
 
 >> Round(1.5, 0)
 2
@@ -177,10 +143,10 @@ Blank()
 0
 
 >> RoundUp(1.1, 1/0)
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> RoundUp(1/0, 0)
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> RoundDown(1.9, 0)
 1
@@ -201,10 +167,10 @@ Blank()
 600
 
 >> RoundDown(2.111, 1/0)
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> RoundDown(1/0, 2)
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> Trunc(2.111, 2)
 2.11
@@ -225,13 +191,13 @@ Blank()
 0
 
 >> Trunc(1.1, 1/0)
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> Trunc(1/0, 0)
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> Trunc(1/0)
-#Error
+Error({Kind:ErrorKind.Div0})
 
 >> Int(4.1)
 4
@@ -240,8 +206,8 @@ Blank()
 -5
 
 >> Int(Blank())
-Blank()
+0
 
 >> Int(1/0)
-#Error
+Error({Kind:ErrorKind.Div0})
 

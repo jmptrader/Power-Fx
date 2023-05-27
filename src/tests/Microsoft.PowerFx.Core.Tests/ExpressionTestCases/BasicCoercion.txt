@@ -1,4 +1,5 @@
-﻿// Coercion!
+﻿
+// Coercion!
 >> "Hello " & 42
 "Hello 42"
 
@@ -17,7 +18,7 @@
 
 // non-numeric Strings don't coorce
 >> ("x" * "3")
-#Error
+Error({Kind:ErrorKind.InvalidArgument})
 
 // bools coorce to number as 1 or 0
 >> true - false
@@ -35,10 +36,10 @@ true
 
 // can coorce text to bool via logical operators
 >> "true" && "anything"
-false
+Error({Kind:ErrorKind.InvalidArgument})
 
 >> "anything" || "true"
-true
+Error({Kind:ErrorKind.InvalidArgument})
 
 // blank coorces to false via logical operators
 >> true && !Blank()
@@ -46,7 +47,16 @@ true
 
 // Erroneous Date -> Bool coercion
 >> Date(2000,1,2) && 1
-Errors: Error 0-14: Invalid argument type. Expecting one of the following: Boolean, Number, Text, OptionSetValue.
+Errors: Error 0-14: Invalid argument type. Expecting one of the following: Boolean, Number, Decimal, Text, OptionSetValue, UntypedObject.
 
 >> If(Date(2000,1,1),1,2)
 Errors: Error 3-17: Invalid argument type (Date). Expecting a Boolean value instead.
+
+>> GUID("AAAAAAAA-BBBB-CCCC-DDDD-EEEEFFFFFFFF") & " is a GUID"
+"aaaaaaaa-bbbb-cccc-dddd-eeeeffffffff is a GUID"
+
+>> If(1<0, DateTime(2000,1,1,1,1,1), Time(12,34,56,789))
+DateTime(1899,12,30,12,34,56,789)
+
+>> If(1<0, DateTime(2000,1,1,1,1,1), Date(2023,3,27))
+DateTime(2023,3,27,0,0,0,0)

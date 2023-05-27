@@ -5,16 +5,17 @@ using Microsoft.PowerFx.Core.Functions.Delegation;
 using Microsoft.PowerFx.Core.Localization;
 using Microsoft.PowerFx.Core.Types;
 
+#pragma warning disable SA1402 // File may only contain a single type
+#pragma warning disable SA1649 // File name should match first type name
+
 namespace Microsoft.PowerFx.Core.Texl.Builtins
 {
     // Average(arg1:n, arg2:n, ..., argN:n)
     // Corresponding Excel function: Average
     internal sealed class AverageFunction : StatisticalFunction
     {
-        public override bool RequiresErrorContext => true;
-
         public AverageFunction()
-            : base("Average", TexlStrings.AboutAverage, FunctionCategories.MathAndStat)
+            : base("Average", TexlStrings.AboutAverage, FunctionCategories.MathAndStat, nativeDecimal: true)
         {
         }
     }
@@ -23,13 +24,14 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
     // Corresponding DAX function: Average
     internal sealed class AverageTableFunction : StatisticalTableFunction
     {
-        public override bool RequiresErrorContext => true;
-
         public override DelegationCapability FunctionDelegationCapability => DelegationCapability.Average;
 
         public AverageTableFunction()
-            : base("Average", TexlStrings.AboutAverageT, FunctionCategories.Table)
+            : base("Average", TexlStrings.AboutAverageT, FunctionCategories.Table, nativeDecimal: true)
         {
         }
     }
 }
+
+#pragma warning restore SA1402 // File may only contain a single type
+#pragma warning restore SA1649 // File name should match first type name

@@ -4,8 +4,7 @@
 using System;
 using System.Collections.Generic;
 using Microsoft.PowerFx.Core.Binding;
-using Microsoft.PowerFx.Core.Public.Types;
-using Microsoft.PowerFx.Core.Public.Values;
+using Microsoft.PowerFx.Types;
 
 namespace Microsoft.PowerFx
 {
@@ -13,6 +12,35 @@ namespace Microsoft.PowerFx
     // Could represent either a fixed variable or a formula. 
     internal class RecalcFormulaInfo
     {
+        private RecalcFormulaInfo() 
+        { 
+        }
+        
+        public static RecalcFormulaInfo NewVariable(ISymbolSlot slot, string name, FormulaType type)
+        {
+            return new RecalcFormulaInfo
+            {
+                Name = name,
+                _type = type,
+                Slot = slot
+            };
+        }
+
+        public static RecalcFormulaInfo NewFormula(ISymbolSlot slot, string name, FormulaType type, HashSet<string> dependsOn, TexlBinding binding, Action<string, FormulaValue> onUpdate)
+        {
+            return new RecalcFormulaInfo
+            {
+                Name = name,
+                _dependsOn = dependsOn,
+                _type = type,
+                _binding = binding,
+                _onUpdate = onUpdate,
+                Slot = slot
+            };
+        }
+
+        public string Name { get; private set; }
+
         // Other variables that this formula depends on. 
         public HashSet<string> _dependsOn;
 
@@ -29,7 +57,11 @@ namespace Microsoft.PowerFx
         // For recalc, needed for execution 
         public TexlBinding _binding;
 
-        // Cached value
-        public FormulaValue _value;
+        // Value is on Parent's symbol table, accessed via Slot. 
+        public ISymbolSlot Slot { get; set; }
+
+        // True iff this is a formula that is recalculated. 
+        // Formulas aren't mutable. 
+        public bool IsFormula => _binding != null;     
     }
 }

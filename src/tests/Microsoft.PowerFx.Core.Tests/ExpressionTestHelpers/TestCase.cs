@@ -24,6 +24,21 @@ namespace Microsoft.PowerFx.Core.Tests
         public int SourceLine;
         public string SetupHandlerName;
 
+        // For diagnostics, save the orginal location
+        public string OverrideFrom;
+
+        public bool IsOverride => OverrideFrom != null;
+
+        // Mark that the test is getting overriden with a new expected result. 
+        // This enables per-engine customizations.
+        public void MarkOverride(TestCase newTest)
+        {
+            OverrideFrom = $"{newTest.SourceFile}:{newTest.SourceLine}";
+            Expected = newTest.Expected;
+            SourceFile = newTest.SourceFile;
+            SourceLine = newTest.SourceLine;
+        }
+
         // Uniquely identity this test case. 
         // This is very useful for when another file needs to override the results. 
         public string GetUniqueId(string file)
@@ -31,7 +46,7 @@ namespace Microsoft.PowerFx.Core.Tests
             // Inputs are case sensitive, so the overall key must be case sensitive. 
             // But filenames are case insensitive, so canon them to lowercase.
             var fileKey = file ?? Path.GetFileName(SourceFile);
-            
+
             return fileKey.ToLower() + ":" + Input;
         }
 

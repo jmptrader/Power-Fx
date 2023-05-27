@@ -6,9 +6,12 @@ using Microsoft.PowerFx.Core.App.ErrorContainers;
 using Microsoft.PowerFx.Core.Binding;
 using Microsoft.PowerFx.Core.Functions;
 using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Syntax.Nodes;
 using Microsoft.PowerFx.Core.Types;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
+
+#pragma warning disable SA1402 // File may only contain a single type
+#pragma warning disable SA1649 // File name should match first type name
 
 namespace Microsoft.PowerFx.Core.Texl.Builtins
 {
@@ -19,10 +22,8 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
     {
         public override bool IsSelfContained => true;
 
-        public override bool SupportsParamCoercion => true;
-
         public ConcatenateFunction()
-            : base("Concatenate", TexlStrings.AboutConcatenate, FunctionCategories.Text, DType.String, 0, 0, int.MaxValue)
+            : base("Concatenate", TexlStrings.AboutConcatenate, FunctionCategories.Text, DType.String, 0, 1, int.MaxValue)
         {
         }
 
@@ -45,7 +46,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             return base.GetSignatures(arity);
         }
 
-        public override bool CheckInvocation(TexlBinding binding, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
+        public override bool CheckTypes(CheckTypesContext context, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
         {
             Contracts.AssertValue(args);
             Contracts.AssertValue(argTypes);
@@ -59,13 +60,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
 
             for (var i = 0; i < count; i++)
             {
-                var typeChecks = CheckType(args[i], argTypes[i], DType.String, errors, true, out DType coercionType);
-                if (typeChecks && coercionType != null)
-                {
-                    CollectionUtils.Add(ref nodeToCoercedTypeMap, args[i], coercionType);
-                }
-
-                fArgsValid &= typeChecks;
+                fArgsValid &= CheckType(context, args[i], argTypes[i], DType.String, errors, ref nodeToCoercedTypeMap);
             }
 
             if (!fArgsValid)
@@ -87,8 +82,6 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
     internal sealed class ConcatenateTableFunction : BuiltinFunction
     {
         public override bool IsSelfContained => true;
-
-        public override bool SupportsParamCoercion => true;
 
         public ConcatenateTableFunction()
             : base("Concatenate", TexlStrings.AboutConcatenateT, FunctionCategories.Table | FunctionCategories.Text, DType.EmptyTable, 0, 1, int.MaxValue)
@@ -117,7 +110,7 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             return GetUniqueTexlRuntimeName(suffix: "_T");
         }
 
-        public override bool CheckInvocation(TexlBinding binding, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
+        public override bool CheckTypes(CheckTypesContext context, TexlNode[] args, DType[] argTypes, IErrorContainer errors, out DType returnType, out Dictionary<TexlNode, DType> nodeToCoercedTypeMap)
         {
             Contracts.AssertValue(args);
             Contracts.AssertValue(argTypes);
@@ -134,8 +127,17 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
             // Type check the args
             for (var i = 0; i < count; i++)
             {
-                fArgsValid &= CheckParamIsTypeOrSingleColumnTable(DType.String, args[i], argTypes[i], errors, out var isTable, ref nodeToCoercedTypeMap);
-                hasTableArg |= isTable;
+                // The check for null on the next line is a special case for Concatenate, to retain prior behavior
+                // See UntypedBlankAsTable.txt for more examples
+                if (argTypes[i].IsTable && argTypes[i] != DType.ObjNull)
+                {
+                    fArgsValid &= CheckStringColumnType(context, args[i], argTypes[i], errors, ref nodeToCoercedTypeMap);
+                    hasTableArg |= true;
+                }
+                else
+                {
+                    fArgsValid &= CheckType(context, args[i], argTypes[i], DType.String, errors, ref nodeToCoercedTypeMap);
+                }
             }
 
             fArgsValid &= hasTableArg;
@@ -145,9 +147,12 @@ namespace Microsoft.PowerFx.Core.Texl.Builtins
                 nodeToCoercedTypeMap = null;
             }
 
-            returnType = DType.CreateTable(new TypedName(DType.String, OneColumnTableResultName));
+            returnType = DType.CreateTable(new TypedName(DType.String, GetOneColumnTableResultName(context.Features)));
 
-            return hasTableArg && fArgsValid;
+            return fArgsValid;
         }
     }
 }
+
+#pragma warning restore SA1402 // File may only contain a single type
+#pragma warning restore SA1649 // File name should match first type name

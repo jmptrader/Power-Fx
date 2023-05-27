@@ -2,20 +2,24 @@
 // Licensed under the MIT license.
 
 using System.Collections.Generic;
-using Microsoft.PowerFx.Core.Lexer.Tokens;
 using Microsoft.PowerFx.Core.Localization;
-using Microsoft.PowerFx.Core.Syntax.SourceInformation;
-using Microsoft.PowerFx.Core.Syntax.Visitors;
 using Microsoft.PowerFx.Core.Utils;
+using Microsoft.PowerFx.Syntax;
+using Microsoft.PowerFx.Syntax.SourceInformation;
 
-namespace Microsoft.PowerFx.Core.Syntax.Nodes
+namespace Microsoft.PowerFx.Syntax
 {
-    internal sealed class ListNode : VariadicBase
+    /// <summary>
+    /// List expression parse node. Example:
+    /// 
+    /// <code>[Arg1, Arg2, ...]</code>
+    /// </summary>
+    public sealed class ListNode : VariadicBase
     {
-        public readonly Token[] Delimiters;
+        internal readonly Token[] Delimiters;
 
         // Assumes ownership of 'args' array and the rgtokDelimiters array.
-        public ListNode(ref int idNext, Token tok, TexlNode[] args, Token[] delimiters, SourceList sourceList)
+        internal ListNode(ref int idNext, Token tok, TexlNode[] args, Token[] delimiters, SourceList sourceList)
             : base(ref idNext, tok, sourceList, args)
         {
             Contracts.AssertValue(args);
@@ -23,7 +27,7 @@ namespace Microsoft.PowerFx.Core.Syntax.Nodes
             Delimiters = delimiters;
         }
 
-        public override TexlNode Clone(ref int idNext, Span ts)
+        internal override TexlNode Clone(ref int idNext, Span ts)
         {
             var children = CloneChildren(ref idNext, ts);
             var newNodes = new Dictionary<TexlNode, TexlNode>();
@@ -40,6 +44,7 @@ namespace Microsoft.PowerFx.Core.Syntax.Nodes
                 SourceList.Clone(ts, newNodes));
         }
 
+        /// <inheritdoc />
         public override void Accept(TexlVisitor visitor)
         {
             Contracts.AssertValue(visitor);
@@ -50,19 +55,21 @@ namespace Microsoft.PowerFx.Core.Syntax.Nodes
             }
         }
 
+        /// <inheritdoc />
         public override TResult Accept<TResult, TContext>(TexlFunctionalVisitor<TResult, TContext> visitor, TContext context)
         {
             return visitor.Visit(this, context);
         }
 
+        /// <inheritdoc />
         public override NodeKind Kind => NodeKind.List;
 
-        public override ListNode CastList()
+        internal override ListNode CastList()
         {
             return this;
         }
 
-        public override ListNode AsList()
+        internal override ListNode AsList()
         {
             return this;
         }

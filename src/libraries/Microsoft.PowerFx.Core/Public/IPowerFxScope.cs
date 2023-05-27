@@ -1,9 +1,7 @@
 ﻿// Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-using Microsoft.PowerFx.Core.Texl.Intellisense;
-
-namespace Microsoft.PowerFx.Core.Public
+namespace Microsoft.PowerFx.Intellisense
 {
     /// <summary>
     /// Provide intellisense (Design-time) support. 
@@ -13,13 +11,18 @@ namespace Microsoft.PowerFx.Core.Public
         /// <summary>
         /// Check for errors in the given expression. 
         /// </summary>
-        /// <param name="expression"></param>
-        /// <returns></returns>
+        /// <param name="expression">The expression to validate.</param>
+        /// <returns>Validation result.</returns>
         CheckResult Check(string expression);
 
         /// <summary>
         /// Provide intellisense for expression.
         /// </summary>
         IIntellisenseResult Suggest(string expression, int cursorPosition);
+
+        /// <summary>
+        /// Converts punctuators and identifiers in an expression to the appropriate display format.
+        /// </summary>
+        string ConvertToDisplay(string expression);
     }
 }
